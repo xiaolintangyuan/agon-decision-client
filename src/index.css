@@ -1,0 +1,121 @@
+@import "tailwindcss";
+
+@theme {
+  --color-ink-950: #07080a;
+  --color-ink-900: #0b0d10;
+  --color-ink-850: #0f1216;
+  --color-ink-800: #14181d;
+  --color-ink-750: #191e24;
+  --color-ink-700: #1f252c;
+  --color-ink-600: #2b323a;
+  --color-ink-500: #3c444e;
+  --color-mute-500: #6b747f;
+  --color-mute-400: #838d98;
+  --color-mute-300: #a3adb8;
+  --color-mute-100: #dde3ea;
+  --color-brass-700: #8a5f1c;
+  --color-brass-600: #b7802c;
+  --color-brass-500: #e0a63c;
+  --color-brass-400: #f2c377;
+  --color-brass-300: #f8dcae;
+  --color-jade-500: #4fc48b;
+  --color-jade-400: #78d9ab;
+  --color-coral-500: #e8735f;
+  --color-coral-400: #f09383;
+  --color-azure-500: #6ba4dd;
+  --color-azure-400: #96c2ea;
+  --color-violet-500: #9d8bf0;
+
+  --font-sans: "Inter Tight", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background-color: var(--color-ink-950);
+  color: var(--color-mute-100);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* subtle instrument-panel grain */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background-image:
+    radial-gradient(circle at 18% 0%, rgba(224, 166, 60, 0.07), transparent 42%),
+    radial-gradient(circle at 88% 100%, rgba(107, 164, 221, 0.06), transparent 45%);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #232a32;
+  border-radius: 99px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #333c47;
+  background-clip: content-box;
+}
+
+@layer utilities {
+  .label-xs {
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    font-weight: 600;
+  }
+  .hairline {
+    border-color: var(--color-ink-700);
+  }
+}
+
+@keyframes pulse-ring {
+  0% {
+    box-shadow: 0 0 0 0 rgba(224, 166, 60, 0.45);
+  }
+  70% {
+    box-shadow: 0 0 0 7px rgba(224, 166, 60, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(224, 166, 60, 0);
+  }
+}
+.pulse-ring {
+  animation: pulse-ring 1.8s infinite;
+}
+
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+.shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background-image: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.055),
+    transparent
+  );
+  animation: shimmer 1.6s infinite;
+}
