@@ -13,7 +13,7 @@ import type {
 
 /** Accepts anything the user is likely to paste:
  *  http://localhost:8000  |  http://host/v1  |  http://host/v1/systemone
- *  host:8000               |  https://gw.example.com/unsloth/
+ *  host:8000               |  https://gw.example.com/gateway/
  * and returns a clean origin+path root. */
 export function normalizeBaseUrl(raw: string): string {
     let s = (raw || "").trim();
@@ -33,19 +33,54 @@ export function apiUrl(base: string, path: string): string {
 }
 
 export function prettyEndpoint(base: string, dialect: Dialect): string {
-    const path =
-        dialect === "systemone" ? "systemone" : dialect === "chat" ? "chat/completions" : "messages";
+    const path = dialect === "systemone" ? "systemone" : "chat/completions";
     return apiUrl(base, path);
 }
 
-const OPENROUTER_APP_HEADERS: Record<string, string> = {
-    "HTTP-Referer": "https://xiaolintangyuan.github.io/agon-decision-client",
-    "X-OpenRouter-Title": "Agon Decision Client",
-    "X-OpenRouter-Categories": "personal-agent",
+/** Lowercased hostname of a base URL, or "" when it is empty or not parseable (the user may be mid-typing). */
+function hostnameOf(baseUrl: string): string {
+    const normalizedURL = normalizeBaseUrl(baseUrl);
+    if (normalizedURL === "") {
+        return "";
+    }
+    try {
+        return new URL(normalizedURL).hostname.toLowerCase();
+    } catch {
+        return "";
+    }
+}
+
+interface ModelFilter {
+    parameter: string;
+    valueByDialect: Record<Dialect, string>;
+}
+
+/** Hostname -> the query parameter that narrows the /models list for that provider, and its value per dialect. */
+const MODEL_FILTER_BY_DOMAIN: Record<string, ModelFilter> = {
+    "openrouter.ai": {
+        parameter: "output_modalities",
+        valueByDialect: {
+            systemone: "decisions",
+            chat: "text",
+        },
+    },
 };
 
+/** Hostname -> extra headers sent only to that provider (e.g. app attribution). Add an entry to cover another one. */
+const HEADERS_BY_DOMAIN: Record<string, Record<string, string>> = {
+    "openrouter.ai": {
+        "HTTP-Referer": "https://xiaolintangyuan.github.io/agon-decision-client",
+        "X-OpenRouter-Title": "Agon Decision Client",
+        "X-OpenRouter-Categories": "personal-agent",
+    },
+};
+
+function endpointHeaders(baseUrl: string): Record<string, string> {
+    return HEADERS_BY_DOMAIN[hostnameOf(baseUrl)] ?? {};
+}
+
 function authHeaders(s: ConnectionSettings): Record<string, string> {
-    const h: Record<string, string> = { "Content-Type": "application/json", ...OPENROUTER_APP_HEADERS };
+    const h: Record<string, string> = { "Content-Type": "application/json", ...endpointHeaders(s.baseUrl) };
     const key = (s.apiKey || "").trim();
     if (key) {
         h.Authorization = `Bearer ${key}`;
@@ -89,7 +124,7 @@ async function request(
             /failed to fetch|networkerror|load failed/i.test(err?.message || "");
         throw new ApiError(
             isCors
-                ? `Network / CORS failure reaching ${new URL(url).origin}. The browser blocked the call. Unsloth must be serving with CORS enabled (or use a gateway that allows this origin), and the URL must be reachable from this machine.`
+                ? `Network / CORS failure reaching ${new URL(url).origin}. The browser blocked the call. The server must allow CORS from this origin (or sit behind a gateway that does), and the URL must be reachable from this machine.`
                 : err?.message || "Network request failed",
             "network",
         );
@@ -114,9 +149,9 @@ async function request(
 
 function describeHttp(status: number, json: unknown): string {
     if (status === 401 || status === 403)
-        return "401 Unauthorized — the API key was rejected. Check Settings → API Key (Unsloth keys start with sk-unsloth-).";
+        return "401 Unauthorized — the API key was rejected. Check the API key in the connection settings.";
     if (status === 404)
-        return "404 Not Found — this endpoint does not exist on the target. Try the endpoint without /v1/systemone, and confirm the Decision API is enabled in Unsloth (Settings → API).";
+        return "404 Not Found — this endpoint does not exist on the target. Try the endpoint without /v1/systemone, and confirm the server exposes this API.";
     if (status === 429) return "429 Rate limited by the gateway. Wait a moment and retry.";
     if (status >= 500) return `${status} Server error from the gateway/model host.`;
     if (json && typeof json === "object") {
@@ -131,8 +166,19 @@ function describeHttp(status: number, json: unknown): string {
 /* Models                                                              */
 /* ------------------------------------------------------------------ */
 
+function buildModelsUrl(s: ConnectionSettings): string {
+    const modelsUrl = apiUrl(s.baseUrl, "models");
+    const modelFilter = MODEL_FILTER_BY_DOMAIN[hostnameOf(s.baseUrl)];
+    if (modelFilter === undefined) {
+        return modelsUrl;
+    }
+    const parsedUrl = new URL(modelsUrl);
+    parsedUrl.searchParams.set(modelFilter.parameter, modelFilter.valueByDialect[s.dialect]);
+    return parsedUrl.toString();
+}
+
 export async function fetchModels(s: ConnectionSettings): Promise<string[]> {
-    const { json } = await request(apiUrl(s.baseUrl, "models"), {
+    const { json } = await request(buildModelsUrl(s), {
         method: "GET",
         headers: authHeaders(s),
     });
@@ -232,7 +278,7 @@ export function buildChatBody(
     history: Turn[],
 ) {
     const sys = [
-        "You are a decision-modelling engine connected to an Unsloth deployment.",
+        "You are a decision-modelling engine.",
         "Answer the operator's questions directly and concisely. Prefer structured JSON when a structured answer is requested.",
     ].join(" ");
 
@@ -256,7 +302,11 @@ export function buildChatBody(
             .join("\n")
         : "";
 
-    const messages: { role: string; content: string }[] = [{ role: "system", content: sys }];
+    // A plain chat must not be told it is a decision engine that prefers JSON.
+    const messages: { role: string; content: string }[] = [];
+    if (typed.length > 0) {
+        messages.push({ role: "system", content: sys });
+    }
     for (const h of history.slice(-8)) {
         if (h.role === "user") messages.push({ role: "user", content: h.state || "" });
         else if (h.text) messages.push({ role: "assistant", content: h.text });
@@ -522,6 +572,37 @@ export interface CallResult {
     requestUrl: string;
 }
 
+async function postChatCompletion(
+    settings: ConnectionSettings,
+    questions: Question[],
+    state: string,
+    history: Turn[],
+    url: string,
+): Promise<CallResult> {
+    const body = buildChatBody(settings, questions, state, history);
+    const { json, ms } = await request(url, {
+        method: "POST",
+        headers: authHeaders(settings),
+        body: JSON.stringify(body),
+    });
+    return {
+        requestUrl: url,
+        turn: {
+            id: "",
+            role: "assistant",
+            createdAt: Date.now(),
+            text: pickText(json) ?? "(empty response)",
+            answers: normalizeAnswers(json, questions),
+            endpoint: url,
+            rawRequest: body,
+            rawResponse: json,
+            model: body.model,
+            durationMs: ms,
+            status: "ok",
+        },
+    };
+}
+
 export async function runDecision(
     settings: ConnectionSettings,
     qs: Question[],
@@ -559,29 +640,16 @@ export async function runDecision(
         };
     }
 
-    const body = buildChatBody(settings, qs, state, history);
-    const { json, ms } = await request(url, {
-        method: "POST",
-        headers: authHeaders(settings),
-        body: JSON.stringify(body),
-    });
-    const text = pickText(json);
-    return {
-        requestUrl: url,
-        turn: {
-            id: "",
-            role: "assistant",
-            createdAt: Date.now(),
-            text: text ?? "(empty response)",
-            answers: normalizeAnswers(json, qs),
-            endpoint: url,
-            rawRequest: body,
-            rawResponse: json,
-            model: body.model,
-            durationMs: ms,
-            status: "ok",
-        },
-    };
+    return postChatCompletion(settings, qs, state, history, url);
+}
+
+export async function runChat(
+    settings: ConnectionSettings,
+    message: string,
+    history: Turn[],
+): Promise<CallResult> {
+    const url = prettyEndpoint(settings.baseUrl, settings.dialect);
+    return postChatCompletion(settings, [], message, history, url);
 }
 
 /* ------------------------------------------------------------------ */
@@ -683,6 +751,37 @@ export function runDemo(settings: ConnectionSettings, qs: Question[], state: str
             endpoint: prettyEndpoint(settings.baseUrl, "systemone"),
             model: body.model,
             durationMs: 40 + (seed % 300),
+            status: "ok",
+            demo: true,
+        },
+    };
+}
+
+const CHAT_DEMO_REPLY =
+    "This is a simulated reply, so no request was sent. To talk to a real model, open Connections, " +
+    "enter a base URL (and an API key if the server needs one), then run Test connection. " +
+    "A successful test turns demo mode off.";
+
+export function runChatDemo(settings: ConnectionSettings, message: string): CallResult {
+    const endpoint = prettyEndpoint(settings.baseUrl, settings.dialect);
+    const body = buildChatBody(settings, [], message, []);
+    return {
+        requestUrl: endpoint,
+        turn: {
+            id: "",
+            role: "assistant",
+            createdAt: Date.now(),
+            text: CHAT_DEMO_REPLY,
+            answers: [],
+            rawRequest: body,
+            rawResponse: {
+                model: body.model,
+                text: CHAT_DEMO_REPLY,
+                _note: "Simulated locally — no network request was made.",
+            },
+            endpoint,
+            model: body.model,
+            durationMs: 40 + (hash(message) % 300),
             status: "ok",
             demo: true,
         },

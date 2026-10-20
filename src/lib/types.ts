@@ -1,4 +1,7 @@
-export type Dialect = "systemone" | "chat" | "messages";
+export type Dialect = "systemone" | "chat";
+
+/** SystemOne drives the typed decision composer; the chat-style dialects drive a plain chat. */
+export type InterfaceMode = "decision" | "chat";
 
 export type QType = "noul" | "choice" | "score" | "text";
 
@@ -65,7 +68,13 @@ export interface ConnectionSettings {
   topP: number;
   includeHistory: boolean;
   extraHeaders: string;
-  rememberKey: boolean;
+}
+
+/** A connection remembered in localStorage. `baseUrl` is normalized and unique across the list. */
+export interface SavedConnection {
+    baseUrl: string;
+    apiKey: string;
+    savedAt: number;
 }
 
 export interface LogEntry {

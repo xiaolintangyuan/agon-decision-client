@@ -12,7 +12,8 @@ import {
 } from "lucide-react";
 import type { NormalizedAnswer, Question, Turn } from "../lib/types";
 import { slug } from "../lib/api";
-import { Bar, Chip, JsonBlock, pct } from "./Primitives";
+import { Bar, Chip, JsonBlock } from "./Primitives";
+import { pct } from "../lib/format";
 
 function toneFor(p: number | null): "jade" | "brass" | "coral" {
   if (p === null) return "brass";
@@ -272,6 +273,18 @@ export function UserTurn({ turn, onReplay }: { turn: Turn; onReplay: () => void 
       </div>
     </div>
   );
+}
+
+export function ChatUserTurn({ turn }: { turn: Turn }) {
+    return (
+        <div className="flex justify-end">
+            <div className="max-w-[92%] rounded-2xl rounded-br-md border border-ink-700 bg-ink-850 px-4 py-3 sm:max-w-[75%]">
+                <p className="whitespace-pre-wrap break-words text-[13.5px] leading-relaxed text-mute-100">
+                    {turn.state}
+                </p>
+            </div>
+        </div>
+    );
 }
 
 export function AssistantTurn({ turn }: { turn: Turn }) {

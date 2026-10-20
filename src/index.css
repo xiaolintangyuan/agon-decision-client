@@ -9,6 +9,7 @@
   --color-ink-700: #1f252c;
   --color-ink-600: #2b323a;
   --color-ink-500: #3c444e;
+  --color-mute-600: #5f6772;
   --color-mute-500: #6b747f;
   --color-mute-400: #838d98;
   --color-mute-300: #a3adb8;
@@ -26,8 +27,21 @@
   --color-azure-400: #96c2ea;
   --color-violet-500: #9d8bf0;
 
-  --font-sans: "Inter Tight", ui-sans-serif, system-ui, -apple-system, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-sans: "Montserrat", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  /* Technical values use Montserrat too, so the existing font-mono classes follow the single app font. */
+  --font-mono: "Montserrat", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-heading: "Oswald", "Montserrat", ui-sans-serif, system-ui, sans-serif;
+}
+
+@layer base {
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: var(--font-heading);
+  }
 }
 
 html,
