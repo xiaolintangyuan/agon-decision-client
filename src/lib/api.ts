@@ -1,6 +1,7 @@
 import type {
     ConnectionSettings,
     Dialect,
+    LogEntry,
     NormalizedAnswer,
     QType,
     Question,
@@ -116,42 +117,109 @@ export class ApiError extends Error {
     }
 }
 
-async function request(
-    url: string,
-    init: RequestInit,
-): Promise<{ json: unknown; ms: number; status: number }> {
-    const t0 = performance.now();
-    let res: Response;
+export interface RequestOptions {
+    /** Records the call in the request log. Only conversation POSTs opt in. */
+    logRequest?: boolean;
+    /** The body object that was sent, kept as an object so the log shows it without re-parsing. */
+    requestBody?: unknown;
+}
+
+export type RequestLogSink = (entry: LogEntry) => void | Promise<void>;
+
+let requestLogSink: RequestLogSink | null = null;
+
+/** Where finished logged requests go. Set once by the app; null stops logging. */
+export function setRequestLogSink(sink: RequestLogSink | null): void {
+    requestLogSink = sink;
+}
+
+/** Logging is a side channel: a failing sink is reported but never changes the outcome of the request. */
+async function deliverLogEntry(entry: LogEntry): Promise<void> {
+    if (requestLogSink === null) {
+        return;
+    }
     try {
-        res = await fetch(url, init);
-    } catch (e) {
-        const err = e as Error;
-        const isCors =
-            err?.name === "TypeError" ||
-            /failed to fetch|networkerror|load failed/i.test(err?.message || "");
-        throw new ApiError(
-            isCors
-                ? `Network / CORS failure reaching ${new URL(url).origin}. The browser blocked the call. The server must allow CORS from this origin (or sit behind a gateway that does), and the URL must be reachable from this machine.`
-                : err?.message || "Network request failed",
+        await requestLogSink(entry);
+    } catch (error) {
+        console.error("A request log entry could not be delivered.", error);
+    }
+}
+
+type RequestRecord = Pick<LogEntry, "requestedAt" | "method" | "url" | "status" | "ms" | "ok" | "response">;
+
+function recordRequest(options: RequestOptions, record: RequestRecord): void {
+    if (options.logRequest !== true) {
+        return;
+    }
+    void deliverLogEntry({ uuid: crypto.randomUUID(), request: options.requestBody, ...record });
+}
+
+function describeNetworkFailure(caught: unknown, url: string): ApiError {
+    const error = caught as Error;
+    const isCors =
+        error?.name === "TypeError" ||
+        /failed to fetch|networkerror|load failed/i.test(error?.message || "");
+    if (isCors) {
+        return new ApiError(
+            `Network / CORS failure reaching ${new URL(url).origin}. The browser blocked the call. The server must allow CORS from this origin (or sit behind a gateway that does), and the URL must be reachable from this machine.`,
             "network",
         );
     }
-    const ms = Math.round(performance.now() - t0);
-    const text = await res.text();
-    let json: unknown = null;
+    return new ApiError(error?.message || "Network request failed", "network");
+}
+
+function parseResponseBody(text: string): unknown {
+    if (text === "") {
+        return null;
+    }
     try {
-        json = text ? JSON.parse(text) : null;
+        return JSON.parse(text);
     } catch {
-        json = text;
+        return text;
     }
-    if (!res.ok) {
-        throw new ApiError(
-            describeHttp(res.status, json),
-            res.status,
-            typeof text === "string" ? text.slice(0, 800) : undefined,
-        );
+}
+
+async function request(
+    url: string,
+    init: RequestInit,
+    options: RequestOptions = {},
+): Promise<{ json: unknown; ms: number; status: number }> {
+    const method = init.method ?? "GET";
+    const requestedAt = Date.now();
+    const startedAt = performance.now();
+    let response: Response;
+    try {
+        response = await fetch(url, init);
+    } catch (caught) {
+        const failure = describeNetworkFailure(caught, url);
+        const failedMs = Math.round(performance.now() - startedAt);
+        recordRequest(options, {
+            url,
+            method,
+            requestedAt,
+            status: "network",
+            ms: failedMs,
+            ok: false,
+            response: failure.message,
+        });
+        throw failure;
     }
-    return { json, ms, status: res.status };
+    const ms = Math.round(performance.now() - startedAt);
+    const text = await response.text();
+    const json = parseResponseBody(text);
+    recordRequest(options, {
+        url,
+        method,
+        requestedAt,
+        status: response.status,
+        ms,
+        ok: response.ok,
+        response: json,
+    });
+    if (!response.ok) {
+        throw new ApiError(describeHttp(response.status, json), response.status, text.slice(0, 800));
+    }
+    return { json, ms, status: response.status };
 }
 
 function describeHttp(status: number, json: unknown): string {
@@ -587,11 +655,15 @@ async function postChatCompletion(
     url: string,
 ): Promise<CallResult> {
     const body = buildChatBody(settings, questions, state, history);
-    const { json, ms } = await request(url, {
-        method: "POST",
-        headers: authHeaders(settings),
-        body: JSON.stringify(body),
-    });
+    const { json, ms } = await request(
+        url,
+        {
+            method: "POST",
+            headers: authHeaders(settings),
+            body: JSON.stringify(body),
+        },
+        { logRequest: true, requestBody: body },
+    );
     return {
         requestUrl: url,
         turn: {
@@ -625,11 +697,15 @@ export async function runDecision(
 
     if (dialect === "systemone") {
         const body = buildSystemOneBody(settings, qs, state, history);
-        const { json, ms } = await request(url, {
-            method: "POST",
-            headers: authHeaders(settings),
-            body: JSON.stringify(body),
-        });
+        const { json, ms } = await request(
+            url,
+            {
+                method: "POST",
+                headers: authHeaders(settings),
+                body: JSON.stringify(body),
+            },
+            { logRequest: true, requestBody: body },
+        );
         return {
             requestUrl: url,
             turn: {

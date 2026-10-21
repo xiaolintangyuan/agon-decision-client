@@ -1,22 +1,14 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ComponentProps } from "react";
-import {
-    Download,
-    Eraser,
-    FlaskConical,
-    Menu,
-    Settings2,
-    Sparkles,
-    X,
-} from "lucide-react";
-import SettingsPanel from "./components/SettingsPanel";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Download, Eraser, FlaskConical, Menu, Settings2, Sparkles, X } from "lucide-react";
+import type { ConversationAction } from "./components/ConversationActions";
 import ConnectionDialog from "./components/ConnectionDialog";
 import Composer from "./components/Composer";
 import ChatComposer from "./components/ChatComposer";
 import ModelPicker, { type ModelPickerProps } from "./components/ModelPicker";
 import ResizablePanel from "./components/ResizablePanel";
 import { AssistantTurn, ChatUserTurn, PendingTurn, UserTurn } from "./components/TurnView";
-import { Chip } from "./components/Primitives";
+import ManageDialog, { type ManageDialogRequest } from "./components/ManageDialog";
+import SidebarContent from "./components/SidebarContent";
 import {
     ApiError,
     fetchModels,
@@ -28,15 +20,19 @@ import {
 } from "./lib/api";
 import type { CallResult } from "./lib/api";
 import { findConnectionById, findFirstConnectionByURL, getSavedConnections } from "./lib/connections";
+import { exportFileName, toExportedConversation } from "./lib/conversationExport";
+import { downloadJson } from "./lib/downloadJson";
 import { newQuestion, uid } from "./lib/questions";
 import * as store from "./lib/storage";
+import { turnsBefore } from "./lib/turnEditing";
+import { useConversations } from "./lib/useConversations";
 import { useModelCatalog } from "./lib/useModelCatalog";
+import { useRequestLogs } from "./lib/useRequestLogs";
 import type {
     ConnectionSettings,
     ConnState,
     Dialect,
     InterfaceMode,
-    LogEntry,
     Question,
     SavedConnection,
     Turn,
@@ -115,24 +111,7 @@ const EXAMPLES: { label: string; hint: string; state: string; questions: Questio
     },
 ];
 
-type ChipTone = NonNullable<ComponentProps<typeof Chip>["tone"]>;
 type Example = (typeof EXAMPLES)[number];
-type Transcripts = Record<InterfaceMode, Turn[]>;
-type PendingModes = Record<InterfaceMode, boolean>;
-
-const CONN_TONE: Record<ConnState, ChipTone> = {
-    ok: "jade",
-    error: "coral",
-    testing: "brass",
-    unknown: "neutral",
-};
-
-const CONN_TEXT: Record<ConnState, string> = {
-    ok: "connected",
-    error: "unreachable",
-    testing: "connecting",
-    unknown: "not connected",
-};
 
 const CONN_DOT_CLASS: Record<ConnState, string> = {
     ok: "bg-jade-500 pulse-ring",
@@ -146,30 +125,36 @@ const DIALECT_OPTIONS: { value: Dialect; label: string; shortLabel: string }[] =
     { value: "chat", label: "Chat", shortLabel: "Chat" },
 ];
 
-function decisionGreeting(): Turn {
-    return {
-        id: uid(),
-        role: "assistant",
-        createdAt: Date.now(),
-        text:
-            "Agon Decision Client is ready. Open Connections to set an endpoint and an API key, then describe what you want decided. You can ask several typed questions at once — a SystemOne endpoint scores them all in a single forward pass.",
-    };
-}
-
-function chatGreeting(): Turn {
-    return {
-        id: uid(),
-        role: "assistant",
-        createdAt: Date.now(),
-        text:
-            "This is a plain chat with the configured model. Switch the dialect to SystemOne in the header to get typed decisions (noul, choice and score) instead.",
-    };
-}
-
-const GREETING_BY_MODE: Record<InterfaceMode, () => Turn> = {
-    decision: decisionGreeting,
-    chat: chatGreeting,
+// The greeting is never stored: it is what an empty conversation shows.
+const DECISION_GREETING: Turn = {
+    id: "greeting-decision",
+    role: "assistant",
+    createdAt: 0,
+    text:
+        "Agon Decision Client is ready. Open Connections to set an endpoint and an API key, then describe what you want decided. You can ask several typed questions at once — a SystemOne endpoint scores them all in a single forward pass.",
 };
+
+const CHAT_GREETING: Turn = {
+    id: "greeting-chat",
+    role: "assistant",
+    createdAt: 0,
+    text:
+        "This is a plain chat with the configured model. Switch the dialect to SystemOne in the header to get typed decisions (noul, choice and score) instead.",
+};
+
+function modeForDialect(dialect: Dialect): InterfaceMode {
+    if (dialect === "systemone") {
+        return "decision";
+    }
+    return "chat";
+}
+
+function dialectForMode(mode: InterfaceMode): Dialect {
+    if (mode === "decision") {
+        return "systemone";
+    }
+    return "chat";
+}
 
 /**
  * Old versions persisted the key next to the settings; keys now live only in the saved-connections list.
@@ -261,6 +246,33 @@ async function requestChat(
     return runChat(settings, message, history);
 }
 
+interface ConversationActionConfig {
+    exportDisabled: boolean;
+    clearDisabled: boolean;
+    onExport: () => void;
+    onClear: () => void;
+}
+
+/** One entry per action, rendered in order, so a new conversation action is one new entry here. */
+function buildConversationActions(config: ConversationActionConfig): ConversationAction[] {
+    return [
+        {
+            id: "export",
+            label: "Export conversation",
+            icon: Download,
+            handler: config.onExport,
+            disabled: config.exportDisabled,
+        },
+        {
+            id: "clear",
+            label: "Clear conversation",
+            icon: Eraser,
+            handler: config.onClear,
+            disabled: config.clearDisabled,
+        },
+    ];
+}
+
 function DialectSwitch({
     dialect,
     onChange,
@@ -303,8 +315,6 @@ interface AppHeaderProps {
     onDialectChange: (dialect: Dialect) => void;
     onOpenMenu: () => void;
     onOpenSettings: () => void;
-    onExport: () => void;
-    onClear: () => void;
 }
 
 function AppHeader({
@@ -313,8 +323,6 @@ function AppHeader({
     onDialectChange,
     onOpenMenu,
     onOpenSettings,
-    onExport,
-    onClear,
 }: AppHeaderProps) {
     return (
         <header className="flex shrink-0 items-center gap-2 border-b border-ink-700 bg-ink-900/70 px-4 py-2.5 backdrop-blur-xl sm:gap-3">
@@ -350,20 +358,6 @@ function AppHeader({
                 className="flex items-center rounded-lg border border-ink-700 bg-ink-850 p-1.5 text-mute-300 transition hover:border-ink-600"
             >
                 <Settings2 size={14} />
-            </button>
-            <button
-                onClick={onExport}
-                title="Export transcript"
-                className="rounded-lg border border-ink-700 bg-ink-850 p-1.5 text-mute-300 transition hover:border-ink-600 hover:text-mute-100"
-            >
-                <Download size={14} />
-            </button>
-            <button
-                onClick={onClear}
-                title="Clear conversation"
-                className="rounded-lg border border-ink-700 bg-ink-850 p-1.5 text-mute-300 transition hover:border-coral-500/60 hover:text-coral-400"
-            >
-                <Eraser size={14} />
             </button>
         </header>
     );
@@ -432,31 +426,46 @@ function TemplatePicker({ onPick }: { onPick: (example: Example) => void }) {
     );
 }
 
-function DecisionRow({ turn, onReplay }: { turn: Turn; onReplay: (turn: Turn) => void }) {
+interface RowActions {
+    actionsDisabled: boolean;
+    onReplay: (turn: Turn) => void;
+    onRewind: (turn: Turn) => void;
+}
+
+function DecisionRow({ turn, actionsDisabled, onReplay, onRewind }: RowActions & { turn: Turn }) {
     if (turn.role === "user") {
-        return <UserTurn turn={turn} onReplay={() => onReplay(turn)} />;
+        return (
+            <UserTurn
+                turn={turn}
+                actionsDisabled={actionsDisabled}
+                onReplay={() => onReplay(turn)}
+                onRewind={() => onRewind(turn)}
+            />
+        );
     }
     return <AssistantTurn turn={turn} />;
 }
 
 function DecisionTranscript({
     turns,
-    pending,
-    onReplay,
+    pendingAfterTurnId,
     onPickExample,
-}: {
+    ...actions
+}: RowActions & {
     turns: Turn[];
-    pending: boolean;
-    onReplay: (turn: Turn) => void;
+    pendingAfterTurnId: string | null;
     onPickExample: (example: Example) => void;
 }) {
     return (
         <>
-            {turns.length <= 1 && <TemplatePicker onPick={onPickExample} />}
+            {turns.length === 0 && <TemplatePicker onPick={onPickExample} />}
+            {turns.length === 0 && <AssistantTurn turn={DECISION_GREETING} />}
             {turns.map((turn) => (
-                <DecisionRow key={turn.id} turn={turn} onReplay={onReplay} />
+                <Fragment key={turn.id}>
+                    <DecisionRow turn={turn} {...actions} />
+                    {pendingAfterTurnId === turn.id && <PendingTurn />}
+                </Fragment>
             ))}
-            {pending && <PendingTurn />}
         </>
     );
 }
@@ -483,33 +492,44 @@ function ChatEmptyState({
     );
 }
 
-function ChatRow({ turn }: { turn: Turn }) {
+function ChatRow({ turn, actionsDisabled, onReplay, onRewind }: RowActions & { turn: Turn }) {
     if (turn.role === "user") {
-        return <ChatUserTurn turn={turn} />;
+        return (
+            <ChatUserTurn
+                turn={turn}
+                actionsDisabled={actionsDisabled}
+                onReplay={() => onReplay(turn)}
+                onRewind={() => onRewind(turn)}
+            />
+        );
     }
     return <AssistantTurn turn={turn} />;
 }
 
 function ChatTranscript({
     turns,
-    pending,
+    pendingAfterTurnId,
     model,
     endpoint,
     simulated,
-}: {
+    ...actions
+}: RowActions & {
     turns: Turn[];
-    pending: boolean;
+    pendingAfterTurnId: string | null;
     model: string;
     endpoint: string;
     simulated: boolean;
 }) {
     return (
         <>
-            {turns.length <= 1 && <ChatEmptyState model={model} endpoint={endpoint} simulated={simulated} />}
+            {turns.length === 0 && <ChatEmptyState model={model} endpoint={endpoint} simulated={simulated} />}
+            {turns.length === 0 && <AssistantTurn turn={CHAT_GREETING} />}
             {turns.map((turn) => (
-                <ChatRow key={turn.id} turn={turn} />
+                <Fragment key={turn.id}>
+                    <ChatRow turn={turn} {...actions} />
+                    {pendingAfterTurnId === turn.id && <PendingTurn />}
+                </Fragment>
             ))}
-            {pending && <PendingTurn />}
         </>
     );
 }
@@ -517,16 +537,11 @@ function ChatTranscript({
 export default function App() {
     const persisted = useMemo(() => store.load(), []);
     const [settings, setSettings] = useState<ConnectionSettings>(() => restoreSettings(persisted.settings));
-    const [transcripts, setTranscripts] = useState<Transcripts>(() => ({
-        decision: [GREETING_BY_MODE.decision()],
-        chat: [GREETING_BY_MODE.chat()],
-    }));
-    const [pending, setPending] = useState<PendingModes>({ decision: false, chat: false });
-    const [logs, setLogs] = useState<LogEntry[]>(persisted.logs ?? []);
     const [conn, setConn] = useState<ConnState>("unknown");
     const [connNote, setConnNote] = useState("");
     const [demo, setDemo] = useState(!persisted.settings?.baseUrl);
     const [sidebar, setSidebar] = useState(false);
+    const [manageRequest, setManageRequest] = useState<ManageDialogRequest | null>(null);
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [questions, setQuestions] = useState<Question[]>(() => [newQuestion("noul")]);
     const [state, setState] = useState("");
@@ -536,26 +551,27 @@ export default function App() {
     );
     const scrollRef = useRef<HTMLDivElement>(null);
 
-    const interfaceMode: InterfaceMode = settings.dialect === "systemone" ? "decision" : "chat";
-    const busy = pending[interfaceMode];
+    // The screen follows the open conversation, so what is shown always matches the conversation's own mode.
+    const conversationState = useConversations(modeForDialect(settings.dialect), alignDialectWithMode);
+    const requestLogs = useRequestLogs();
+    const interfaceMode = conversationState.mode;
+    const busy = conversationState.isPending;
 
     useEffect(() => {
         store.save({
             // Keys persist only through the saved-connections list, never with the settings blob.
             // The model lives in sessionStorage (see modelSelection.ts).
             settings: { ...settings, apiKey: "", model: "" },
-            history: transcripts[interfaceMode],
-            logs: logs.slice(0, 60),
             composerHeight,
         });
-    }, [settings, transcripts, interfaceMode, logs, composerHeight]);
+    }, [settings, composerHeight]);
 
     useEffect(() => {
         const scrollElement = scrollRef.current;
         if (scrollElement) {
             scrollElement.scrollTop = scrollElement.scrollHeight;
         }
-    }, [transcripts, pending, interfaceMode]);
+    }, [conversationState.turns, conversationState.pendingAfterTurnId, interfaceMode]);
 
     const patch = useCallback((p: Partial<ConnectionSettings>) => {
         setSettings((s) => ({ ...s, ...p }));
@@ -591,8 +607,19 @@ export default function App() {
         onReload: modelCatalog.reload,
     };
 
-    function pushLog(l: Omit<LogEntry, "id" | "at">) {
-        setLogs((prev) => [{ id: uid(), at: Date.now(), ...l }, ...prev].slice(0, 60));
+    /** Opening a stored conversation of the other mode switches the dialect; it never starts a new draft. */
+    function alignDialectWithMode(mode: InterfaceMode) {
+        if (modeForDialect(settings.dialect) !== mode) {
+            patch({ dialect: dialectForMode(mode) });
+        }
+    }
+
+    function changeDialect(dialect: Dialect) {
+        if (dialect === settings.dialect) {
+            return;
+        }
+        patch({ dialect });
+        conversationState.startDraft(modeForDialect(dialect));
     }
 
     async function testConnection() {
@@ -607,59 +634,28 @@ export default function App() {
         try {
             const list = await fetchModels(settings);
             const ms = Math.round(performance.now() - t0);
-            pushLog({ method: "GET", url: "models", status: 200, ms, ok: true });
             setConn("ok");
             setConnNote(`${list.length} model${list.length === 1 ? "" : "s"} reachable · ${ms}ms`);
             setDemo(false);
         } catch (e) {
-            const ms = Math.round(performance.now() - t0);
             const err = e as ApiError;
-            pushLog({
-                method: "GET",
-                url: "models",
-                status: err.status === "network" ? "network" : (err.status as number),
-                ms,
-                ok: false,
-            });
             setConn("error");
             setConnNote(err.message);
         }
     }
 
-    function appendTurn(mode: InterfaceMode, turn: Turn) {
-        setTranscripts((previous) => ({ ...previous, [mode]: [...previous[mode], turn] }));
-    }
-
-    function setPendingFor(mode: InterfaceMode, value: boolean) {
-        setPending((previous) => ({ ...previous, [mode]: value }));
-    }
-
-    function recordSuccess(mode: InterfaceMode, turn: Turn, useDemo: boolean) {
-        pushLog({
-            method: "POST",
-            url: turn.endpoint ?? "",
-            status: 200,
-            ms: turn.durationMs ?? 0,
-            ok: true,
-        });
+    function recordSuccess(uuid: string, userTurnId: string, turn: Turn, useDemo: boolean) {
         if (!useDemo) {
             setConn("ok");
         }
-        appendTurn(mode, { ...turn, id: uid() });
+        conversationState.insertReply(uuid, userTurnId, { ...turn, id: uid() });
     }
 
-    function recordFailure(mode: InterfaceMode, error: ApiError) {
-        pushLog({
-            method: "POST",
-            url: `${normalizeBaseUrl(settings.baseUrl)}/v1/...`,
-            status: error.status === "network" ? "network" : (error.status as number),
-            ms: 0,
-            ok: false,
-        });
+    function recordFailure(uuid: string, userTurnId: string, error: ApiError) {
         if (error.status === "network") {
             setConn("error");
         }
-        appendTurn(mode, {
+        conversationState.insertReply(uuid, userTurnId, {
             id: uid(),
             role: "assistant",
             createdAt: Date.now(),
@@ -669,61 +665,81 @@ export default function App() {
         });
     }
 
-    /** The reply is filed under the mode that sent it, so switching modes while waiting cannot misplace it. */
+    /** The reply is filed under the conversation that sent it, so switching conversations while waiting cannot misplace it. */
     async function runExchange(
-        mode: InterfaceMode,
+        uuid: string,
+        userTurnId: string,
         useDemo: boolean,
         call: () => Promise<CallResult>,
     ): Promise<boolean> {
-        setPendingFor(mode, true);
+        conversationState.beginExchange(uuid, userTurnId);
         try {
             const { turn } = await call();
-            recordSuccess(mode, turn, useDemo);
+            recordSuccess(uuid, userTurnId, turn, useDemo);
             return true;
         } catch (caught) {
-            recordFailure(mode, caught as ApiError);
+            recordFailure(uuid, userTurnId, caught as ApiError);
             return false;
         } finally {
-            setPendingFor(mode, false);
+            conversationState.endExchange(uuid);
         }
     }
 
     async function sendDecision() {
         const stateText = state.trim();
-        if (pending.decision || !hasSendableDecision(questions, stateText)) {
+        if (busy || !hasSendableDecision(questions, stateText)) {
             return;
         }
+        const uuid = conversationState.openUUID;
         const useDemo = demo || !endpointReady;
-        const history = transcripts.decision.filter(
+        const history = conversationState.turns.filter(
             (turn) => turn.role === "assistant" && (turn.answers?.length ?? 0) > 0,
         );
+        const userTurn: Turn = { id: uid(), role: "user", createdAt: Date.now(), questions, state: stateText };
 
-        appendTurn("decision", { id: uid(), role: "user", createdAt: Date.now(), questions, state: stateText });
+        conversationState.appendTurn(uuid, userTurn);
         setState("");
 
-        const succeeded = await runExchange("decision", useDemo, () =>
+        const succeeded = await runExchange(uuid, userTurn.id, useDemo, () =>
             requestDecision(settings, questions, stateText, history, useDemo),
         );
-        if (succeeded) {
+        // The composer belongs to whatever is open now; wiping it would discard text typed for another conversation.
+        if (succeeded && conversationState.isOpen(uuid)) {
             setQuestions([newQuestion(questions[0].type)]);
         }
     }
 
     async function sendChat() {
         const message = chatDraft.trim();
-        if (pending.chat || message.length === 0) {
+        if (busy || message.length === 0) {
             return;
         }
+        const uuid = conversationState.openUUID;
         const useDemo = demo || !endpointReady;
-        const history = chatHistory(transcripts.chat);
+        const history = chatHistory(conversationState.turns);
+        const userTurn: Turn = { id: uid(), role: "user", createdAt: Date.now(), state: message };
 
-        appendTurn("chat", { id: uid(), role: "user", createdAt: Date.now(), state: message });
+        conversationState.appendTurn(uuid, userTurn);
         setChatDraft("");
 
-        await runExchange("chat", useDemo, () => requestChat(settings, message, history, useDemo));
+        await runExchange(uuid, userTurn.id, useDemo, () => requestChat(settings, message, history, useDemo));
     }
 
-    function replay(userTurn: Turn) {
+    /** Chat Replay: the message is answered again from the turns before it; later messages stay as they are. */
+    async function resendChat(userTurn: Turn) {
+        if (busy) {
+            return;
+        }
+        const uuid = conversationState.openUUID;
+        const useDemo = demo || !endpointReady;
+        const history = chatHistory(turnsBefore(conversationState.turns, userTurn.id));
+        const message = userTurn.state ?? "";
+
+        conversationState.removeReply(uuid, userTurn.id);
+        await runExchange(uuid, userTurn.id, useDemo, () => requestChat(settings, message, history, useDemo));
+    }
+
+    function loadIntoForm(userTurn: Turn) {
         const replayedQuestions = userTurn.questions ?? [];
         if (replayedQuestions.length === 0) {
             return;
@@ -732,42 +748,54 @@ export default function App() {
         setState(userTurn.state ?? "");
     }
 
+    function rewindDecision(userTurn: Turn) {
+        conversationState.rewindDecisionTurn(userTurn.id);
+        loadIntoForm(userTurn);
+    }
+
+    function rewindChat(userTurn: Turn) {
+        conversationState.rewindChatTurn(userTurn.id);
+        setChatDraft(userTurn.state ?? "");
+    }
+
     function pickExample(example: Example) {
         setQuestions(example.questions);
         setState(example.state);
     }
 
+    /** Clear is for the Conversations action row; it is disabled while the open conversation waits for a reply. */
     function clear() {
-        setTranscripts((previous) => ({ ...previous, [interfaceMode]: [GREETING_BY_MODE[interfaceMode]()] }));
-        if (interfaceMode === "decision") {
-            setQuestions([newQuestion("noul")]);
-            setState("");
-        } else {
-            setChatDraft("");
+        if (busy) {
+            return;
         }
-        store.clearAll();
+        conversationState.clear();
+        setQuestions([newQuestion("noul")]);
+        setState("");
+        setChatDraft("");
     }
 
-    function exportJson() {
-        const blob = new Blob(
-            [
-                JSON.stringify(
-                    {
-                        mode: interfaceMode,
-                        settings: { ...settings, apiKey: "[redacted]" },
-                        turns: transcripts[interfaceMode],
-                    },
-                    null,
-                    2,
-                ),
-            ],
-            { type: "application/json" },
-        );
-        const a = document.createElement("a");
-        a.href = URL.createObjectURL(blob);
-        a.download = `decision-console-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.json`;
-        a.click();
-        URL.revokeObjectURL(a.href);
+    /** Export is for the Conversations action row; it is disabled while the open conversation has no turns. */
+    function exportOpenConversation() {
+        const openConversation = conversationState.openConversation;
+        if (openConversation.content.length === 0) {
+            return;
+        }
+        downloadJson(exportFileName("conversations"), [toExportedConversation(openConversation)]);
+    }
+
+    function openManageDialog(request: ManageDialogRequest) {
+        setSidebar(false);
+        setManageRequest(request);
+    }
+
+    function startNewConversation() {
+        setSidebar(false);
+        conversationState.startDraft(interfaceMode);
+    }
+
+    function openConversation(uuid: string) {
+        setSidebar(false);
+        void conversationState.open(uuid);
     }
 
     function openSettings() {
@@ -814,45 +842,57 @@ export default function App() {
         return () => window.removeEventListener("keydown", onKey);
     });
 
+    const conversationActions = buildConversationActions({
+        exportDisabled: conversationState.turns.length === 0,
+        clearDisabled: busy,
+        onExport: exportOpenConversation,
+        onClear: clear,
+    });
+
+    // The desktop aside and the mobile drawer show the same content.
+    const sidebarContent = (
+        <SidebarContent
+            connection={{
+                settings,
+                onChange: patch,
+                conn,
+                onTest: testConnection,
+                onOpenSettings: openSettings,
+                onNewConnection: startNewConnection,
+            }}
+            conversations={{
+                conversations: conversationState.conversations,
+                openConversationUUID: conversationState.openUUID,
+                actions: conversationActions,
+                onNewConversation: startNewConversation,
+                onOpenConversation: openConversation,
+            }}
+            requestLogs={requestLogs.logs}
+            onOpenManageDialog={openManageDialog}
+        />
+    );
+
     return (
         <div className="relative z-10 flex h-full min-h-screen bg-ink-950">
             <aside className="hidden w-[320px] shrink-0 border-r border-ink-700 bg-ink-900/60 lg:flex lg:flex-col">
-                <div className="flex items-center justify-between border-b border-ink-700 px-4 py-3">
-                    <h2 className="label-xs text-mute-400">Connections</h2>
-                    <Chip tone={CONN_TONE[conn]}>{CONN_TEXT[conn]}</Chip>
-                </div>
-                <SettingsPanel
-                    settings={settings}
-                    onChange={patch}
-                    conn={conn}
-                    onTest={testConnection}
-                    onOpenSettings={openSettings}
-                    onNewConnection={startNewConnection}
-                    logs={logs}
-                    onClearLogs={() => setLogs([])}
-                />
+                {sidebarContent}
             </aside>
 
             {sidebar && (
                 <div className="fixed inset-0 z-50 lg:hidden">
                     <div className="absolute inset-0 bg-ink-950/80" onClick={() => setSidebar(false)} />
                     <div className="absolute inset-y-0 left-0 flex w-[86%] max-w-[340px] flex-col border-r border-ink-700 bg-ink-900">
-                        <div className="flex items-center justify-between border-b border-ink-700 px-4 py-3">
-                            <h2 className="label-xs text-mute-400">Connections</h2>
-                            <button onClick={() => setSidebar(false)} className="text-mute-400">
+                        <div className="flex justify-end border-b border-ink-700 px-4 py-3">
+                            <button
+                                type="button"
+                                onClick={() => setSidebar(false)}
+                                aria-label="Close menu"
+                                className="text-mute-400"
+                            >
                                 <X size={16} />
                             </button>
                         </div>
-                        <SettingsPanel
-                            settings={settings}
-                            onChange={patch}
-                            conn={conn}
-                            onTest={testConnection}
-                            onOpenSettings={openSettings}
-                            onNewConnection={startNewConnection}
-                            logs={logs}
-                            onClearLogs={() => setLogs([])}
-                        />
+                        {sidebarContent}
                     </div>
                 </div>
             )}
@@ -861,11 +901,9 @@ export default function App() {
                 <AppHeader
                     dialect={settings.dialect}
                     modelPicker={modelPicker}
-                    onDialectChange={(dialect) => patch({ dialect })}
+                    onDialectChange={changeDialect}
                     onOpenMenu={() => setSidebar(true)}
                     onOpenSettings={openSettings}
-                    onExport={exportJson}
-                    onClear={clear}
                 />
 
                 <StatusStrip
@@ -881,16 +919,21 @@ export default function App() {
                     <div className="mx-auto w-full max-w-4xl space-y-6 px-4 py-6">
                         {interfaceMode === "decision" && (
                             <DecisionTranscript
-                                turns={transcripts.decision}
-                                pending={pending.decision}
-                                onReplay={replay}
+                                turns={conversationState.turns}
+                                pendingAfterTurnId={conversationState.pendingAfterTurnId}
+                                actionsDisabled={busy}
+                                onReplay={loadIntoForm}
+                                onRewind={rewindDecision}
                                 onPickExample={pickExample}
                             />
                         )}
                         {interfaceMode === "chat" && (
                             <ChatTranscript
-                                turns={transcripts.chat}
-                                pending={pending.chat}
+                                turns={conversationState.turns}
+                                pendingAfterTurnId={conversationState.pendingAfterTurnId}
+                                actionsDisabled={busy}
+                                onReplay={(userTurn) => void resendChat(userTurn)}
+                                onRewind={rewindChat}
                                 model={settings.model.trim() || "default"}
                                 endpoint={normalizeBaseUrl(settings.baseUrl) || "no endpoint"}
                                 simulated={demo || !endpointReady}
@@ -931,6 +974,19 @@ export default function App() {
                 conn={conn}
                 connNote={connNote}
                 onTest={testConnection}
+            />
+
+            <ManageDialog
+                request={manageRequest}
+                onClose={() => setManageRequest(null)}
+                conversations={conversationState.conversations}
+                openConversationUUID={conversationState.openUUID}
+                onOpenConversation={openConversation}
+                onDeleteConversations={conversationState.deleteSelected}
+                onDeleteAllConversations={conversationState.deleteAll}
+                requestLogs={requestLogs.logs}
+                onDeleteRequestLogs={requestLogs.deleteSelected}
+                onDeleteAllRequestLogs={requestLogs.deleteAll}
             />
         </div>
     );

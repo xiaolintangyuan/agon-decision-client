@@ -1,5 +1,8 @@
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
+import { motion } from "framer-motion";
 import { Check, Copy } from "lucide-react";
+import { useDialogBehavior } from "../lib/useDialogBehavior";
+import { dangerButtonClassName, secondaryButtonClassName } from "../lib/dialogStyles";
 
 export function CopyButton({ text, label = "Copy" }: { text: string; label?: string }) {
   const [done, setDone] = useState(false);
@@ -128,4 +131,146 @@ export function Chip({
       {children}
     </span>
   );
+}
+
+interface ModalShellProps {
+    onClose: () => void;
+    maxWidthClassName: string;
+    labelledBy?: string;
+    label?: string;
+    children: ReactNode;
+}
+
+/** Backdrop and panel for a dialog. Mount it inside AnimatePresence so that it fades and scales out. */
+export function ModalShell({ onClose, maxWidthClassName, labelledBy, label, children }: ModalShellProps) {
+    const panelRef = useRef<HTMLDivElement>(null);
+    useDialogBehavior(panelRef, onClose);
+
+    return (
+        <motion.div
+            className="fixed inset-0 z-[60] flex items-center justify-center bg-ink-950/70 p-4 backdrop-blur-sm"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.15 }}
+            onMouseDown={(event) => {
+                if (event.target === event.currentTarget) {
+                    onClose();
+                }
+            }}
+        >
+            <motion.div
+                ref={panelRef}
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby={labelledBy}
+                aria-label={label}
+                tabIndex={-1}
+                initial={{ opacity: 0, scale: 0.97, y: 8 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.97, y: 8 }}
+                transition={{ duration: 0.18, ease: "easeOut" }}
+                className={`flex max-h-[90vh] w-full flex-col rounded-xl border border-ink-700 bg-ink-850 shadow-2xl shadow-black/60 outline-none ${maxWidthClassName}`}
+            >
+                {children}
+            </motion.div>
+        </motion.div>
+    );
+}
+
+interface ConfirmStyle {
+    container: string;
+    confirm: string;
+    cancel: string;
+}
+
+const CONFIRM_STYLES: Record<"text" | "button", ConfirmStyle> = {
+    text: {
+        container: "flex items-center gap-2 text-[11px]",
+        confirm: "font-medium text-coral-400 hover:text-coral-500",
+        cancel: "text-mute-400 transition hover:text-mute-100",
+    },
+    button: {
+        container: "flex items-center gap-2",
+        confirm: dangerButtonClassName,
+        cancel: secondaryButtonClassName,
+    },
+};
+
+interface ConfirmButtonProps {
+    label: string;
+    confirmLabel: string;
+    triggerClassName: string;
+    onConfirm: () => void;
+    disabled?: boolean;
+    /** "button" gives the confirm step the size of the dialog buttons around it. */
+    variant?: "text" | "button";
+}
+
+/** A destructive action that asks "confirm or cancel" in place before it runs. */
+export function ConfirmButton({
+    label,
+    confirmLabel,
+    triggerClassName,
+    onConfirm,
+    disabled,
+    variant = "text",
+}: ConfirmButtonProps) {
+    const [isConfirming, setIsConfirming] = useState(false);
+    const style = CONFIRM_STYLES[variant];
+
+    if (!isConfirming) {
+        return (
+            <button
+                type="button"
+                onClick={() => setIsConfirming(true)}
+                disabled={disabled}
+                className={triggerClassName}
+            >
+                {label}
+            </button>
+        );
+    }
+    return (
+        <span className={style.container}>
+            <button
+                type="button"
+                onClick={() => {
+                    setIsConfirming(false);
+                    onConfirm();
+                }}
+                className={style.confirm}
+            >
+                {confirmLabel}
+            </button>
+            <button type="button" onClick={() => setIsConfirming(false)} className={style.cancel}>
+                Cancel
+            </button>
+        </span>
+    );
+}
+
+export function EmptyNote({ children }: { children: ReactNode }) {
+    return <p className="text-[11px] text-mute-500">{children}</p>;
+}
+
+interface SelectCellProps {
+    label: string;
+    isChecked: boolean;
+    onToggle: () => void;
+}
+
+/** The checkbox cell of a table row. Clicks stop here so that they do not reach a clickable row. */
+export function SelectCell({ label, isChecked, onToggle }: SelectCellProps) {
+    return (
+        <td className="w-9 px-2.5 py-2" onClick={(event) => event.stopPropagation()}>
+            <input
+                type="checkbox"
+                checked={isChecked}
+                onChange={onToggle}
+                aria-label={label}
+                className="h-3.5 w-3.5 accent-[#e0a63c]"
+            />
+        </td>
+    );
 }

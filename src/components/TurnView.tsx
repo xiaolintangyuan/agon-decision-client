@@ -6,7 +6,6 @@ import {
   Cpu,
   Gauge,
   Info,
-  RotateCcw,
   Sparkles,
   TriangleAlert,
 } from "lucide-react";
@@ -15,6 +14,7 @@ import { slug } from "../lib/api";
 import { AssistantMessage } from "./AssistantMessage";
 import { Bar, Chip, JsonBlock } from "./Primitives";
 import { pct } from "../lib/format";
+import TurnActions from "./TurnActions";
 
 function toneFor(p: number | null): "jade" | "brass" | "coral" {
   if (p === null) return "brass";
@@ -217,7 +217,14 @@ export function SummaryStrip({ turn }: { turn: Turn }) {
   );
 }
 
-export function UserTurn({ turn, onReplay }: { turn: Turn; onReplay: () => void }) {
+interface UserTurnProps {
+    turn: Turn;
+    actionsDisabled: boolean;
+    onReplay: () => void;
+    onRewind: () => void;
+}
+
+export function UserTurn({ turn, actionsDisabled, onReplay, onRewind }: UserTurnProps) {
   const qs = turn.questions ?? [];
   return (
     <div className="flex justify-end">
@@ -262,27 +269,25 @@ export function UserTurn({ turn, onReplay }: { turn: Turn; onReplay: () => void 
           )}
         </div>
         <div className="mt-1 flex justify-end">
-            <button
-                onClick={onReplay}
-                title="Load these questions and the state back into the composer"
-                className="inline-flex items-center gap-1.5 rounded-md px-1 py-0.5 text-[11px] text-mute-500 transition hover:text-brass-400"
-            >
-                <RotateCcw size={11} />
-                Replay
-            </button>
+            <TurnActions mode="decision" disabled={actionsDisabled} onReplay={onReplay} onRewind={onRewind} />
         </div>
       </div>
     </div>
   );
 }
 
-export function ChatUserTurn({ turn }: { turn: Turn }) {
+export function ChatUserTurn({ turn, actionsDisabled, onReplay, onRewind }: UserTurnProps) {
     return (
         <div className="flex justify-end">
-            <div className="max-w-[92%] rounded-2xl rounded-br-md border border-ink-700 bg-ink-850 px-4 py-3 sm:max-w-[75%]">
-                <p className="whitespace-pre-wrap break-words text-[13.5px] leading-relaxed text-mute-100">
-                    {turn.state}
-                </p>
+            <div className="max-w-[92%] sm:max-w-[75%]">
+                <div className="rounded-2xl rounded-br-md border border-ink-700 bg-ink-850 px-4 py-3">
+                    <p className="whitespace-pre-wrap break-words text-[13.5px] leading-relaxed text-mute-100">
+                        {turn.state}
+                    </p>
+                </div>
+                <div className="mt-1 flex justify-end">
+                    <TurnActions mode="chat" disabled={actionsDisabled} onReplay={onReplay} onRewind={onRewind} />
+                </div>
             </div>
         </div>
     );

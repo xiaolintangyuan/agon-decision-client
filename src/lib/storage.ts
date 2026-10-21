@@ -1,11 +1,9 @@
-import type { ConnectionSettings, LogEntry, Turn } from "./types";
+import type { ConnectionSettings } from "./types";
 
 const KEY = "decision-console.v1";
 
 export interface Persisted {
   settings: ConnectionSettings;
-  history: Turn[];
-  logs: LogEntry[];
     composerHeight: number | null;
 }
 
@@ -24,13 +22,5 @@ export function save(data: Partial<Persisted>) {
     localStorage.setItem(KEY, JSON.stringify(data));
   } catch {
     /* quota / private mode — non fatal */
-  }
-}
-
-export function clearAll() {
-  try {
-    localStorage.removeItem(KEY);
-  } catch {
-    /* noop */
   }
 }

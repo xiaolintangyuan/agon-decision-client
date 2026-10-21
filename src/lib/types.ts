@@ -81,14 +81,29 @@ export interface SavedConnection {
     apiKey: string;
 }
 
+/** A stored exchange. Timestamps are epoch milliseconds. */
+export interface Conversation {
+    uuid: string;
+    title: string;
+    mode: InterfaceMode;
+    /** Ordered turns; the greeting is a UI-only empty state and is never stored. */
+    content: Turn[];
+    createdAt: number;
+    updatedAt: number;
+}
+
+/** A stored conversation request. Headers and API keys are never recorded. */
 export interface LogEntry {
-  id: string;
-  at: number;
-  method: string;
-  url: string;
-  status: number | "network";
-  ms: number;
-  ok: boolean;
+    uuid: string;
+    requestedAt: number;
+    method: string;
+    url: string;
+    status: number | "network";
+    ms: number;
+    ok: boolean;
+    request: unknown;
+    /** The response body, the error body, or the network error message. */
+    response: unknown;
 }
 
 export type ConnState = "unknown" | "testing" | "ok" | "error";

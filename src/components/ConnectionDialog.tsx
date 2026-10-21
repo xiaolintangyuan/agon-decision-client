@@ -1,10 +1,11 @@
-import { useEffect, useId, useRef, useState, type ReactNode, type RefObject } from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { useEffect, useId, useState, type ReactNode } from "react";
+import { AnimatePresence } from "framer-motion";
 import { Check, Eye, EyeOff, PlugZap, Save, X } from "lucide-react";
 import type { ConnectionSettings, ConnState } from "../lib/types";
 import { normalizeBaseUrl, prettyEndpoint } from "../lib/api";
 import { connectionLabel, findConnectionById, presetForURL, useSavedConnections } from "../lib/connections";
-import { Label } from "./Primitives";
+import { primaryButtonClassName, secondaryButtonClassName } from "../lib/dialogStyles";
+import { Label, ModalShell } from "./Primitives";
 import EndpointCombobox from "./EndpointCombobox";
 
 export interface ConnectionDialogProps {
@@ -23,9 +24,6 @@ type SectionProps = Pick<ConnectionDialogProps, "settings" | "onChange">;
 
 const inputClassName =
     "w-full rounded-lg border border-ink-700 bg-ink-950/70 px-3 py-2.5 font-mono text-[12px] text-mute-100 outline-none transition placeholder:text-mute-500 focus:border-brass-600 focus:ring-1 focus:ring-brass-600/30";
-
-const secondaryButtonClassName =
-    "inline-flex items-center justify-center gap-2 rounded-lg border border-ink-700 bg-ink-800 px-3.5 py-2 text-[12px] font-medium text-mute-100 transition hover:border-brass-700 hover:text-brass-400 disabled:cursor-not-allowed disabled:opacity-50";
 
 const STATUS_DOT_CLASS_NAMES: Record<ConnState, string> = {
     unknown: "bg-mute-500",
@@ -272,7 +270,7 @@ function DialogFooter({ settings, onChange, conn, connNote, onTest, onClose }: D
                 <button
                     type="button"
                     onClick={onClose}
-                    className="ml-auto rounded-lg bg-brass-600 px-4 py-2 text-[12px] font-semibold text-ink-950 transition hover:bg-brass-500"
+                    className={`ml-auto ${primaryButtonClassName}`}
                 >
                     Done
                 </button>
@@ -303,81 +301,28 @@ function DialogHeader({ titleId, onClose }: { titleId: string; onClose: () => vo
     );
 }
 
-function useDialogBehavior(panelRef: RefObject<HTMLDivElement | null>, onClose: () => void): void {
-    useEffect(() => {
-        const previouslyFocused = document.activeElement;
-        const panel = panelRef.current;
-        if (panel !== null) {
-            panel.focus();
-        }
-        return () => {
-            if (previouslyFocused instanceof HTMLElement) {
-                previouslyFocused.focus();
-            }
-        };
-    }, [panelRef]);
-
-    useEffect(() => {
-        function handleKeyDown(event: KeyboardEvent): void {
-            if (event.key === "Escape") {
-                onClose();
-            }
-        }
-        document.addEventListener("keydown", handleKeyDown);
-        return () => {
-            document.removeEventListener("keydown", handleKeyDown);
-        };
-    }, [onClose]);
-}
-
 function DialogView({ onClose, settings, onChange, conn, connNote, onTest }: DialogViewProps) {
     const titleId = useId();
-    const panelRef = useRef<HTMLDivElement>(null);
-    useDialogBehavior(panelRef, onClose);
 
     return (
-        <motion.div
-            className="fixed inset-0 z-[60] flex items-center justify-center bg-ink-950/70 p-4 backdrop-blur-sm"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.15 }}
-            onMouseDown={(event) => {
-                if (event.target === event.currentTarget) {
-                    onClose();
-                }
-            }}
-        >
-            <motion.div
-                ref={panelRef}
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby={titleId}
-                tabIndex={-1}
-                initial={{ opacity: 0, scale: 0.97, y: 8 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.97, y: 8 }}
-                transition={{ duration: 0.18, ease: "easeOut" }}
-                className="flex max-h-[90vh] w-full max-w-[560px] flex-col rounded-xl border border-ink-700 bg-ink-850 shadow-2xl shadow-black/60 outline-none"
-            >
-                <DialogHeader titleId={titleId} onClose={onClose} />
-                <div className="min-h-0 flex-1 overflow-y-auto px-5 sm:px-6">
-                    <NameSection settings={settings} onChange={onChange} />
-                    <EndpointSection settings={settings} onChange={onChange} />
-                    <ApiKeySection settings={settings} onChange={onChange} />
-                    <GenerationSection settings={settings} onChange={onChange} />
-                    <HeadersSection settings={settings} onChange={onChange} />
-                </div>
-                <DialogFooter
-                    settings={settings}
-                    onChange={onChange}
-                    conn={conn}
-                    connNote={connNote}
-                    onTest={onTest}
-                    onClose={onClose}
-                />
-            </motion.div>
-        </motion.div>
+        <ModalShell onClose={onClose} maxWidthClassName="max-w-[560px]" labelledBy={titleId}>
+            <DialogHeader titleId={titleId} onClose={onClose} />
+            <div className="min-h-0 flex-1 overflow-y-auto px-5 sm:px-6">
+                <NameSection settings={settings} onChange={onChange} />
+                <EndpointSection settings={settings} onChange={onChange} />
+                <ApiKeySection settings={settings} onChange={onChange} />
+                <GenerationSection settings={settings} onChange={onChange} />
+                <HeadersSection settings={settings} onChange={onChange} />
+            </div>
+            <DialogFooter
+                settings={settings}
+                onChange={onChange}
+                conn={conn}
+                connNote={connNote}
+                onTest={onTest}
+                onClose={onClose}
+            />
+        </ModalShell>
     );
 }
 

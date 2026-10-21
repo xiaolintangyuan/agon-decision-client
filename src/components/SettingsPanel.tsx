@@ -1,21 +1,18 @@
-import { useState, type ReactNode } from "react";
-import { Activity, Bookmark, Check, KeyRound, PlugZap, Plus, Settings, Trash2 } from "lucide-react";
-import type { ConnectionSettings, ConnState, LogEntry, SavedConnection } from "../lib/types";
+import type { ReactNode } from "react";
+import { Bookmark, Check, KeyRound, PlugZap, Plus, Settings, Trash2 } from "lucide-react";
+import type { ConnectionSettings, ConnState, SavedConnection } from "../lib/types";
 import { normalizeBaseUrl } from "../lib/api";
 import { connectionLabel, maskKey, useSavedConnections } from "../lib/connections";
+import { ConfirmButton } from "./Primitives";
 
-interface Props {
+export interface SettingsPanelProps {
     settings: ConnectionSettings;
     onChange: (patch: Partial<ConnectionSettings>) => void;
     conn: ConnState;
     onTest: () => void;
     onOpenSettings: () => void;
     onNewConnection: () => void;
-    logs: LogEntry[];
-    onClearLogs: () => void;
 }
-
-const VISIBLE_LOG_ENTRIES = 40;
 
 /** An unsaved draft may have no name yet, so the preset or host stands in for it. */
 function displayName(name: string, baseUrl: string): string {
@@ -103,36 +100,6 @@ function ActiveConnectionCard({ settings, conn, onTest, onOpenSettings }: Active
     );
 }
 
-function ClearAllControl({ onConfirm }: { onConfirm: () => void }) {
-    const [isConfirming, setIsConfirming] = useState(false);
-
-    if (!isConfirming) {
-        return (
-            <button
-                type="button"
-                onClick={() => setIsConfirming(true)}
-                className="text-[11px] text-mute-500 transition hover:text-coral-400"
-            >
-                Clear all
-            </button>
-        );
-    }
-    return (
-        <span className="flex items-center gap-2 text-[11px]">
-            <button type="button" onClick={onConfirm} className="font-medium text-coral-400 hover:text-coral-500">
-                Delete all
-            </button>
-            <button
-                type="button"
-                onClick={() => setIsConfirming(false)}
-                className="text-mute-400 transition hover:text-mute-100"
-            >
-                Cancel
-            </button>
-        </span>
-    );
-}
-
 interface SavedConnectionRowProps {
     connection: SavedConnection;
     isActive: boolean;
@@ -181,7 +148,7 @@ function SavedConnectionsSection({
     settings,
     onChange,
     onNewConnection,
-}: Pick<Props, "settings" | "onChange" | "onNewConnection">) {
+}: Pick<SettingsPanelProps, "settings" | "onChange" | "onNewConnection">) {
     const { connections, removeConnection, clearConnections } = useSavedConnections();
 
     return (
@@ -200,7 +167,14 @@ function SavedConnectionsSection({
                         <Plus size={12} />
                         New
                     </button>
-                    {connections.length > 0 && <ClearAllControl onConfirm={clearConnections} />}
+                    {connections.length > 0 && (
+                        <ConfirmButton
+                            label="Clear all"
+                            confirmLabel="Delete all"
+                            triggerClassName="text-[11px] text-mute-500 transition hover:text-coral-400"
+                            onConfirm={clearConnections}
+                        />
+                    )}
                 </div>
             </div>
             {connections.length === 0 && (
@@ -231,47 +205,6 @@ function SavedConnectionsSection({
     );
 }
 
-function LogRow({ entry }: { entry: LogEntry }) {
-    return (
-        <li className="flex items-center gap-2 rounded-md border border-ink-750 bg-ink-900/60 px-2 py-1.5 font-mono text-[10px]">
-            <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${entry.ok ? "bg-jade-500" : "bg-coral-500"}`} />
-            <span className="w-9 shrink-0 text-mute-400">{entry.method}</span>
-            <span className="shrink-0 text-mute-300">{entry.status}</span>
-            <span className="truncate text-mute-500">{entry.ms}ms</span>
-            <span className="ml-auto shrink-0 text-mute-600">{new Date(entry.at).toLocaleTimeString()}</span>
-        </li>
-    );
-}
-
-function RequestLog({ logs, onClearLogs }: Pick<Props, "logs" | "onClearLogs">) {
-    return (
-        <section className="space-y-3">
-            <div className="flex items-center justify-between">
-                <SectionTitle icon={<Activity size={13} className="text-mute-500" />}>Request log</SectionTitle>
-                {logs.length > 0 && (
-                    <button
-                        type="button"
-                        onClick={onClearLogs}
-                        className="text-mute-500 transition hover:text-coral-400"
-                        title="Clear log"
-                        aria-label="Clear log"
-                    >
-                        <Trash2 size={13} />
-                    </button>
-                )}
-            </div>
-            {logs.length === 0 && (
-                <p className="text-[11px] text-mute-500">No requests yet. Logs are stored locally only.</p>
-            )}
-            <ul className="space-y-1">
-                {logs.slice(0, VISIBLE_LOG_ENTRIES).map((entry) => (
-                    <LogRow key={entry.id} entry={entry} />
-                ))}
-            </ul>
-        </section>
-    );
-}
-
 export default function SettingsPanel({
     settings,
     onChange,
@@ -279,18 +212,11 @@ export default function SettingsPanel({
     onTest,
     onOpenSettings,
     onNewConnection,
-    logs,
-    onClearLogs,
-}: Props) {
+}: SettingsPanelProps) {
     return (
-        <div className="flex h-full flex-col gap-6 overflow-y-auto px-4 py-5">
+        <div className="flex flex-col gap-6">
             <ActiveConnectionCard settings={settings} conn={conn} onTest={onTest} onOpenSettings={onOpenSettings} />
             <SavedConnectionsSection settings={settings} onChange={onChange} onNewConnection={onNewConnection} />
-            <RequestLog logs={logs} onClearLogs={onClearLogs} />
-            <p className="pb-4 text-[10px] leading-relaxed text-mute-600">
-                Everything runs in your browser. Requests go straight from this page to your endpoint, with no
-                proxy and no telemetry. Saved keys stay in this browser's localStorage.
-            </p>
         </div>
     );
 }
