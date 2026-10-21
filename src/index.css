@@ -30,6 +30,7 @@
   --font-sans: "Montserrat", ui-sans-serif, system-ui, -apple-system, sans-serif;
   /* Technical values use Montserrat too, so the existing font-mono classes follow the single app font. */
   --font-mono: "Montserrat", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-code: ui-monospace, "Cascadia Code", "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
   --font-heading: "Oswald", "Montserrat", ui-sans-serif, system-ui, sans-serif;
 }
 
@@ -132,4 +133,200 @@ body::before {
     transparent
   );
   animation: shimmer 1.6s infinite;
+}
+
+/* Assistant reply typography. Tailwind's preflight removes list markers and heading sizes, so they are restored here. */
+.chat-markdown {
+    overflow-wrap: anywhere;
+}
+.chat-markdown > :first-child {
+    margin-top: 0;
+}
+.chat-markdown > :last-child {
+    margin-bottom: 0;
+}
+.chat-markdown p {
+    margin: 0.65em 0;
+}
+.chat-markdown h1,
+.chat-markdown h2,
+.chat-markdown h3,
+.chat-markdown h4,
+.chat-markdown h5,
+.chat-markdown h6 {
+    margin: 1.1em 0 0.45em;
+    line-height: 1.25;
+    font-weight: 600;
+    color: var(--color-mute-100);
+}
+.chat-markdown h1 {
+    font-size: 1.4em;
+}
+.chat-markdown h2 {
+    font-size: 1.22em;
+}
+.chat-markdown h3 {
+    font-size: 1.08em;
+}
+.chat-markdown h4,
+.chat-markdown h5,
+.chat-markdown h6 {
+    font-size: 1em;
+}
+.chat-markdown ul,
+.chat-markdown ol {
+    margin: 0.6em 0;
+    padding-left: 1.5em;
+}
+.chat-markdown ul {
+    list-style: disc;
+}
+.chat-markdown ol {
+    list-style: decimal;
+}
+.chat-markdown li {
+    margin: 0.25em 0;
+}
+.chat-markdown li > p {
+    margin: 0.3em 0;
+}
+.chat-markdown ul.contains-task-list {
+    list-style: none;
+    padding-left: 0.2em;
+}
+.chat-markdown input[type="checkbox"] {
+    margin-right: 0.5em;
+}
+.chat-markdown blockquote {
+    margin: 0.8em 0;
+    padding: 0.1em 0 0.1em 1em;
+    border-left: 3px solid var(--color-brass-600);
+    color: var(--color-mute-300);
+}
+.chat-markdown hr {
+    margin: 1.2em 0;
+    border: 0;
+    border-top: 1px solid var(--color-ink-700);
+}
+.chat-markdown a {
+    color: var(--color-brass-400);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+.chat-markdown a:hover {
+    color: var(--color-brass-300);
+}
+.chat-markdown :not(pre) > code {
+    padding: 0.1em 0.4em;
+    border-radius: 6px;
+    background: var(--color-ink-700);
+    color: var(--color-brass-300);
+    font-family: var(--font-code);
+    font-size: 0.88em;
+}
+.chat-markdown img {
+    max-width: 100%;
+    border-radius: 8px;
+}
+.chat-markdown .chat-table-scroll {
+    margin: 0.8em 0;
+    overflow-x: auto;
+    border: 1px solid var(--color-ink-700);
+    border-radius: 10px;
+}
+.chat-markdown table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.93em;
+}
+.chat-markdown th,
+.chat-markdown td {
+    padding: 0.5em 0.75em;
+    border-bottom: 1px solid var(--color-ink-700);
+    text-align: left;
+}
+.chat-markdown th {
+    background: var(--color-ink-800);
+    font-weight: 600;
+}
+.chat-markdown tr:last-child td {
+    border-bottom: 0;
+}
+.chat-markdown details {
+    margin: 0.7em 0;
+    padding: 0.5em 0.8em;
+    border: 1px solid var(--color-ink-700);
+    border-radius: 10px;
+}
+.chat-markdown summary {
+    cursor: pointer;
+    font-weight: 600;
+}
+.chat-markdown kbd {
+    padding: 0.1em 0.4em;
+    border: 1px solid var(--color-ink-600);
+    border-bottom-width: 2px;
+    border-radius: 5px;
+    background: var(--color-ink-800);
+    font-family: var(--font-code);
+    font-size: 0.85em;
+}
+
+/* Code token colours (highlight.js class names), drawn from the app palette. */
+.hljs-comment,
+.hljs-quote {
+    color: var(--color-mute-500);
+    font-style: italic;
+}
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-doctag,
+.hljs-template-tag,
+.hljs-template-variable {
+    color: var(--color-violet-500);
+}
+.hljs-string,
+.hljs-regexp,
+.hljs-addition,
+.hljs-meta .hljs-string {
+    color: var(--color-jade-400);
+}
+.hljs-number,
+.hljs-literal,
+.hljs-symbol,
+.hljs-bullet {
+    color: var(--color-brass-400);
+}
+.hljs-title,
+.hljs-section,
+.hljs-selector-id,
+.hljs-selector-class {
+    color: var(--color-azure-400);
+}
+.hljs-built_in,
+.hljs-type,
+.hljs-class .hljs-title,
+.hljs-name,
+.hljs-tag {
+    color: var(--color-brass-300);
+}
+.hljs-attr,
+.hljs-attribute,
+.hljs-variable,
+.hljs-property,
+.hljs-params {
+    color: var(--color-azure-500);
+}
+.hljs-meta,
+.hljs-link {
+    color: var(--color-mute-300);
+}
+.hljs-deletion {
+    color: var(--color-coral-400);
+}
+.hljs-emphasis {
+    font-style: italic;
+}
+.hljs-strong {
+    font-weight: 700;
 }

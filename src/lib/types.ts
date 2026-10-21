@@ -59,6 +59,9 @@ export interface NormalizedAnswer {
 }
 
 export interface ConnectionSettings {
+    /** Uuid of the saved connection being used, or "" for a draft that has not been saved. */
+    connectionId: string;
+    name: string;
   baseUrl: string;
   apiKey: string;
   model: string;
@@ -70,11 +73,12 @@ export interface ConnectionSettings {
   extraHeaders: string;
 }
 
-/** A connection remembered in localStorage. `baseUrl` is normalized and unique across the list. */
+/** A connection remembered in localStorage. `baseUrl` is normalized and may repeat with a different key. */
 export interface SavedConnection {
+    uuid: string;
+    name: string;
     baseUrl: string;
     apiKey: string;
-    savedAt: number;
 }
 
 export interface LogEntry {

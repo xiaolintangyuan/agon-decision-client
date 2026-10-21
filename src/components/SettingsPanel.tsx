@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { Activity, Bookmark, Check, KeyRound, PlugZap, Settings, Trash2 } from "lucide-react";
+import { Activity, Bookmark, Check, KeyRound, PlugZap, Plus, Settings, Trash2 } from "lucide-react";
 import type { ConnectionSettings, ConnState, LogEntry, SavedConnection } from "../lib/types";
 import { normalizeBaseUrl } from "../lib/api";
 import { connectionLabel, maskKey, useSavedConnections } from "../lib/connections";
@@ -10,11 +10,20 @@ interface Props {
     conn: ConnState;
     onTest: () => void;
     onOpenSettings: () => void;
+    onNewConnection: () => void;
     logs: LogEntry[];
     onClearLogs: () => void;
 }
 
 const VISIBLE_LOG_ENTRIES = 40;
+
+/** An unsaved draft may have no name yet, so the preset or host stands in for it. */
+function displayName(name: string, baseUrl: string): string {
+    if (name !== "") {
+        return name;
+    }
+    return connectionLabel(baseUrl);
+}
 
 function SectionTitle({ icon, children }: { icon: ReactNode; children: ReactNode }) {
     return (
@@ -45,6 +54,7 @@ function ActiveConnectionCard({ settings, conn, onTest, onOpenSettings }: Active
     const normalizedURL = normalizeBaseUrl(settings.baseUrl);
     const hasEndpoint = normalizedURL !== "";
     const model = settings.model.trim();
+    const name = settings.name.trim();
     return (
         <section className="space-y-4 rounded-xl border border-ink-700 bg-ink-850/70 p-4">
             <div className="flex items-center justify-between gap-2">
@@ -73,7 +83,7 @@ function ActiveConnectionCard({ settings, conn, onTest, onOpenSettings }: Active
 
             <div className="min-w-0">
                 <p className="truncate text-[14px] font-semibold text-mute-100">
-                    {hasEndpoint ? connectionLabel(settings.baseUrl) : "No endpoint set"}
+                    {hasEndpoint ? displayName(name, settings.baseUrl) : "No endpoint set"}
                 </p>
                 <p className="mt-0.5 truncate font-mono text-[10px] text-mute-500" title={normalizedURL}>
                     {hasEndpoint ? normalizedURL : "Open settings to choose one"}
@@ -131,7 +141,7 @@ interface SavedConnectionRowProps {
 }
 
 function SavedConnectionRow({ connection, isActive, onSelect, onRemove }: SavedConnectionRowProps) {
-    const label = connectionLabel(connection.baseUrl);
+    const label = connection.name;
     const rowTone = isActive
         ? "border-brass-600/60 bg-brass-700/10"
         : "border-ink-750 bg-ink-900/60 hover:border-ink-600";
@@ -167,9 +177,12 @@ function SavedConnectionRow({ connection, isActive, onSelect, onRemove }: SavedC
     );
 }
 
-function SavedConnectionsSection({ settings, onChange }: Pick<Props, "settings" | "onChange">) {
+function SavedConnectionsSection({
+    settings,
+    onChange,
+    onNewConnection,
+}: Pick<Props, "settings" | "onChange" | "onNewConnection">) {
     const { connections, removeConnection, clearConnections } = useSavedConnections();
-    const activeURL = normalizeBaseUrl(settings.baseUrl);
 
     return (
         <section className="space-y-3">
@@ -177,7 +190,18 @@ function SavedConnectionsSection({ settings, onChange }: Pick<Props, "settings" 
                 <SectionTitle icon={<Bookmark size={13} className="text-brass-500" />}>
                     Saved connections ({connections.length})
                 </SectionTitle>
-                {connections.length > 0 && <ClearAllControl onConfirm={clearConnections} />}
+                <div className="flex items-center gap-3">
+                    <button
+                        type="button"
+                        onClick={onNewConnection}
+                        title="Add a connection, e.g. the same endpoint with another API key"
+                        className="inline-flex items-center gap-1 text-[11px] text-mute-400 transition hover:text-brass-400"
+                    >
+                        <Plus size={12} />
+                        New
+                    </button>
+                    {connections.length > 0 && <ClearAllControl onConfirm={clearConnections} />}
+                </div>
             </div>
             {connections.length === 0 && (
                 <p className="rounded-lg border border-dashed border-ink-700 px-3 py-4 text-[11px] leading-relaxed text-mute-500">
@@ -188,11 +212,18 @@ function SavedConnectionsSection({ settings, onChange }: Pick<Props, "settings" 
             <ul className="space-y-2">
                 {connections.map((connection) => (
                     <SavedConnectionRow
-                        key={connection.baseUrl}
+                        key={connection.uuid}
                         connection={connection}
-                        isActive={normalizeBaseUrl(connection.baseUrl) === activeURL}
-                        onSelect={() => onChange({ baseUrl: connection.baseUrl, apiKey: connection.apiKey })}
-                        onRemove={() => removeConnection(connection.baseUrl)}
+                        isActive={connection.uuid === settings.connectionId}
+                        onSelect={() =>
+                            onChange({
+                                connectionId: connection.uuid,
+                                name: connection.name,
+                                baseUrl: connection.baseUrl,
+                                apiKey: connection.apiKey,
+                            })
+                        }
+                        onRemove={() => removeConnection(connection.uuid)}
                     />
                 ))}
             </ul>
@@ -247,13 +278,14 @@ export default function SettingsPanel({
     conn,
     onTest,
     onOpenSettings,
+    onNewConnection,
     logs,
     onClearLogs,
 }: Props) {
     return (
         <div className="flex h-full flex-col gap-6 overflow-y-auto px-4 py-5">
             <ActiveConnectionCard settings={settings} conn={conn} onTest={onTest} onOpenSettings={onOpenSettings} />
-            <SavedConnectionsSection settings={settings} onChange={onChange} />
+            <SavedConnectionsSection settings={settings} onChange={onChange} onNewConnection={onNewConnection} />
             <RequestLog logs={logs} onClearLogs={onClearLogs} />
             <p className="pb-4 text-[10px] leading-relaxed text-mute-600">
                 Everything runs in your browser. Requests go straight from this page to your endpoint, with no

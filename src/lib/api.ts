@@ -55,15 +55,19 @@ interface ModelFilter {
     valueByDialect: Record<Dialect, string>;
 }
 
-/** Hostname -> the query parameter that narrows the /models list for that provider, and its value per dialect. */
-const MODEL_FILTER_BY_DOMAIN: Record<string, ModelFilter> = {
-    "openrouter.ai": {
-        parameter: "output_modalities",
-        valueByDialect: {
-            systemone: "decisions",
-            chat: "text",
-        },
+const OUTPUT_MODALITIES_FILTER: ModelFilter = {
+    parameter: "output_modalities",
+    valueByDialect: {
+        systemone: "decisions",
+        chat: "text",
     },
+};
+
+/** Hostname -> the query parameter that narrows the /models list for that provider, and its value per dialect.
+ *  Providers missing here (Together AI, OpenCode, local servers) have no such filter and list every model. */
+const MODEL_FILTER_BY_DOMAIN: Record<string, ModelFilter> = {
+    "openrouter.ai": OUTPUT_MODALITIES_FILTER,
+    "api.vultrinference.com": OUTPUT_MODALITIES_FILTER,
 };
 
 /** Hostname -> extra headers sent only to that provider (e.g. app attribution). Add an entry to cover another one. */
@@ -79,7 +83,10 @@ function endpointHeaders(baseUrl: string): Record<string, string> {
     return HEADERS_BY_DOMAIN[hostnameOf(baseUrl)] ?? {};
 }
 
-function authHeaders(s: ConnectionSettings): Record<string, string> {
+/** The settings a /models request depends on, so callers can watch just these fields. */
+export type ModelRequestSettings = Pick<ConnectionSettings, "baseUrl" | "apiKey" | "dialect" | "extraHeaders">;
+
+function authHeaders(s: Pick<ConnectionSettings, "baseUrl" | "apiKey" | "extraHeaders">): Record<string, string> {
     const h: Record<string, string> = { "Content-Type": "application/json", ...endpointHeaders(s.baseUrl) };
     const key = (s.apiKey || "").trim();
     if (key) {
@@ -166,7 +173,7 @@ function describeHttp(status: number, json: unknown): string {
 /* Models                                                              */
 /* ------------------------------------------------------------------ */
 
-function buildModelsUrl(s: ConnectionSettings): string {
+function buildModelsUrl(s: ModelRequestSettings): string {
     const modelsUrl = apiUrl(s.baseUrl, "models");
     const modelFilter = MODEL_FILTER_BY_DOMAIN[hostnameOf(s.baseUrl)];
     if (modelFilter === undefined) {
@@ -177,7 +184,7 @@ function buildModelsUrl(s: ConnectionSettings): string {
     return parsedUrl.toString();
 }
 
-export async function fetchModels(s: ConnectionSettings): Promise<string[]> {
+export async function fetchModels(s: ModelRequestSettings): Promise<string[]> {
     const { json } = await request(buildModelsUrl(s), {
         method: "GET",
         headers: authHeaders(s),

@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import type { NormalizedAnswer, Question, Turn } from "../lib/types";
 import { slug } from "../lib/api";
+import { AssistantMessage } from "./AssistantMessage";
 import { Bar, Chip, JsonBlock } from "./Primitives";
 import { pct } from "../lib/format";
 
@@ -323,11 +324,7 @@ export function AssistantTurn({ turn }: { turn: Turn }) {
         </div>
       )}
 
-      {!!turn.text && (
-        <div className="whitespace-pre-wrap rounded-2xl rounded-bl-md border border-ink-700 bg-ink-850/70 px-4 py-3 text-[13.5px] leading-relaxed text-mute-100">
-          {turn.text}
-        </div>
-      )}
+      {!!turn.text && <AssistantMessage text={turn.text} />}
 
       {!!turn.answers?.length && (
         <div className="space-y-2.5">

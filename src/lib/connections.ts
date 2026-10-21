@@ -10,6 +10,14 @@ export interface EndpointPreset {
     description: string;
 }
 
+/** What the dialog edits. An empty `uuid` means the connection has not been saved yet. */
+export interface ConnectionDraft {
+    uuid: string;
+    name: string;
+    baseUrl: string;
+    apiKey: string;
+}
+
 // Base URLs omit /v1 because apiUrl() appends it.
 export const ENDPOINT_PRESETS: EndpointPreset[] = [
     {
@@ -48,6 +56,13 @@ export const ENDPOINT_PRESETS: EndpointPreset[] = [
         description: "Hosted open-weight models",
     },
     {
+        id: "vultr",
+        label: "Vultr Inference",
+        baseUrl: "https://api.vultrinference.com",
+        keyPlaceholder: "Vultr Inference API key",
+        description: "Vultr's hosted inference, OpenAI-compatible with SystemOne models",
+    },
+    {
         id: "ollama",
         label: "Ollama (localhost)",
         baseUrl: "http://localhost:11434",
@@ -82,15 +97,37 @@ function isSavedConnection(value: unknown): value is SavedConnection {
     }
     const candidate = value as Record<string, unknown>;
     return (
+        typeof candidate.uuid === "string" &&
+        candidate.uuid !== "" &&
+        typeof candidate.name === "string" &&
+        candidate.name !== "" &&
         typeof candidate.baseUrl === "string" &&
         candidate.baseUrl !== "" &&
-        typeof candidate.apiKey === "string" &&
-        typeof candidate.savedAt === "number" &&
-        Number.isFinite(candidate.savedAt)
+        typeof candidate.apiKey === "string"
     );
 }
 
-export function loadSavedConnections(): SavedConnection[] {
+/** Connections saved before the uuid and name existed carry only an endpoint and a key. */
+function migrateLegacyConnection(value: unknown): SavedConnection | null {
+    if (typeof value !== "object" || value === null) {
+        return null;
+    }
+    const candidate = value as Record<string, unknown>;
+    if (typeof candidate.baseUrl !== "string" || candidate.baseUrl === "") {
+        return null;
+    }
+    if (typeof candidate.apiKey !== "string") {
+        return null;
+    }
+    return {
+        uuid: crypto.randomUUID(),
+        name: connectionLabel(candidate.baseUrl),
+        baseUrl: candidate.baseUrl,
+        apiKey: candidate.apiKey,
+    };
+}
+
+function loadSavedConnections(): SavedConnection[] {
     // localStorage throws in some private modes and the stored JSON may be hand-edited or truncated, so a
     // failure here must degrade to an empty list instead of breaking the whole app on startup.
     try {
@@ -102,14 +139,39 @@ export function loadSavedConnections(): SavedConnection[] {
         if (!Array.isArray(parsed)) {
             return [];
         }
-        return parsed.filter(isSavedConnection);
+        const connections: SavedConnection[] = [];
+        let needsRewrite = false;
+        for (const item of parsed) {
+            if (isSavedConnection(item)) {
+                connections.push(item);
+                continue;
+            }
+            needsRewrite = true;
+            const migrated = migrateLegacyConnection(item);
+            if (migrated !== null) {
+                connections.push(migrated);
+            }
+        }
+        // The generated uuids must be stored now, or the next load would invent different ones.
+        if (needsRewrite) {
+            persistConnections(connections);
+        }
+        return connections;
     } catch (error) {
         console.warn("Saved connections could not be read; starting with an empty list.", error);
         return [];
     }
 }
 
-export function findSavedConnection(
+export function findConnectionById(connections: SavedConnection[], uuid: string): SavedConnection | undefined {
+    if (uuid === "") {
+        return undefined;
+    }
+    return connections.find((connection) => connection.uuid === uuid);
+}
+
+/** Only for settings stored before connections had a uuid; with duplicates allowed the first match wins. */
+export function findFirstConnectionByURL(
     connections: SavedConnection[],
     baseUrl: string,
 ): SavedConnection | undefined {
@@ -185,23 +247,41 @@ function getSnapshot(): SavedConnection[] {
     return currentConnections;
 }
 
-function connectionsWithout(connections: SavedConnection[], normalizedURL: string): SavedConnection[] {
-    return connections.filter((connection) => normalizeBaseUrl(connection.baseUrl) !== normalizedURL);
+/** The current list outside React, for code that runs once at startup. */
+export function getSavedConnections(): SavedConnection[] {
+    return currentConnections;
 }
 
-function saveConnection(baseUrl: string, apiKey: string): void {
-    const normalizedURL = normalizeBaseUrl(baseUrl);
+/** Updates the connection with the draft's uuid in place, or adds a new one when the uuid is unknown. */
+function saveConnection(draft: ConnectionDraft): SavedConnection | undefined {
+    const normalizedURL = normalizeBaseUrl(draft.baseUrl);
     if (normalizedURL === "") {
-        return;
+        return undefined;
     }
-    const others = connectionsWithout(currentConnections, normalizedURL);
-    const saved: SavedConnection = { baseUrl: normalizedURL, apiKey: apiKey.trim(), savedAt: Date.now() };
-    publishConnections([saved, ...others]);
+    const trimmedName = draft.name.trim();
+    const existing = findConnectionById(currentConnections, draft.uuid);
+    const saved: SavedConnection = {
+        uuid: existing?.uuid ?? crypto.randomUUID(),
+        name: trimmedName === "" ? connectionLabel(normalizedURL) : trimmedName,
+        baseUrl: normalizedURL,
+        apiKey: draft.apiKey.trim(),
+    };
+    if (existing === undefined) {
+        publishConnections([saved, ...currentConnections]);
+        return saved;
+    }
+    const updated = currentConnections.map((connection) => {
+        if (connection.uuid === saved.uuid) {
+            return saved;
+        }
+        return connection;
+    });
+    publishConnections(updated);
+    return saved;
 }
 
-function removeConnection(baseUrl: string): void {
-    const normalizedURL = normalizeBaseUrl(baseUrl);
-    publishConnections(connectionsWithout(currentConnections, normalizedURL));
+function removeConnection(uuid: string): void {
+    publishConnections(currentConnections.filter((connection) => connection.uuid !== uuid));
 }
 
 function clearConnections(): void {
@@ -210,8 +290,8 @@ function clearConnections(): void {
 
 export function useSavedConnections(): {
     connections: SavedConnection[];
-    saveConnection: (baseUrl: string, apiKey: string) => void;
-    removeConnection: (baseUrl: string) => void;
+    saveConnection: (draft: ConnectionDraft) => SavedConnection | undefined;
+    removeConnection: (uuid: string) => void;
     clearConnections: () => void;
 } {
     const connections = useSyncExternalStore(subscribe, getSnapshot);

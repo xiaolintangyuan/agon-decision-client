@@ -1,13 +1,8 @@
-import { Fragment, useCallback, useEffect, useId, useRef, useState, type KeyboardEvent, type RefObject } from "react";
+import { Fragment, useCallback, useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import { ChevronDown } from "lucide-react";
 import type { ConnectionSettings, SavedConnection } from "../lib/types";
-import {
-    ENDPOINT_PRESETS,
-    connectionLabel,
-    findSavedConnection,
-    maskKey,
-    useSavedConnections,
-} from "../lib/connections";
+import { ENDPOINT_PRESETS, maskKey, useSavedConnections } from "../lib/connections";
+import { useDismissOnOutsideClick } from "../lib/useDismissOnOutsideClick";
 
 interface Props {
     value: string;
@@ -22,8 +17,9 @@ interface EndpointOption {
     group: OptionGroup;
     label: string;
     baseUrl: string;
-    apiKey: string;
     detail: string;
+    /** The settings applied when the option is chosen. */
+    selection: Partial<ConnectionSettings>;
 }
 
 const GROUP_TITLES: Record<OptionGroup, string> = {
@@ -33,24 +29,30 @@ const GROUP_TITLES: Record<OptionGroup, string> = {
 
 function savedOptions(connections: SavedConnection[]): EndpointOption[] {
     return connections.map((connection) => ({
-        id: `saved:${connection.baseUrl}`,
+        id: `saved:${connection.uuid}`,
         group: "saved",
-        label: connectionLabel(connection.baseUrl),
+        label: connection.name,
         baseUrl: connection.baseUrl,
-        apiKey: connection.apiKey,
         detail: maskKey(connection.apiKey),
+        selection: {
+            connectionId: connection.uuid,
+            name: connection.name,
+            baseUrl: connection.baseUrl,
+            apiKey: connection.apiKey,
+        },
     }));
 }
 
-// A preset carries the key saved for its own URL (or none) so one provider's key is never sent to another.
-function presetOptions(connections: SavedConnection[]): EndpointOption[] {
+// A preset starts a new connection with no key: several keys can exist for one URL, and a key must never
+// travel to a different provider.
+function presetOptions(): EndpointOption[] {
     return ENDPOINT_PRESETS.map((preset) => ({
         id: `preset:${preset.id}`,
         group: "preset",
         label: preset.label,
         baseUrl: preset.baseUrl,
-        apiKey: findSavedConnection(connections, preset.baseUrl)?.apiKey ?? "",
         detail: preset.description,
+        selection: { connectionId: "", name: preset.label, baseUrl: preset.baseUrl, apiKey: "" },
     }));
 }
 
@@ -60,22 +62,6 @@ function filterOptions(options: EndpointOption[], query: string): EndpointOption
         return options;
     }
     return options.filter((option) => `${option.label} ${option.baseUrl}`.toLowerCase().includes(needle));
-}
-
-function useDismissOnOutsideClick(containerRef: RefObject<HTMLElement | null>, onDismiss: () => void): void {
-    useEffect(() => {
-        function handleMouseDown(event: MouseEvent): void {
-            const container = containerRef.current;
-            if (container !== null && event.target instanceof Node && container.contains(event.target)) {
-                return;
-            }
-            onDismiss();
-        }
-        document.addEventListener("mousedown", handleMouseDown);
-        return () => {
-            document.removeEventListener("mousedown", handleMouseDown);
-        };
-    }, [containerRef, onDismiss]);
 }
 
 function GroupHeading({ group }: { group: OptionGroup }) {
@@ -126,7 +112,7 @@ export default function EndpointCombobox({ value, onChange, inputClassName }: Pr
     const inputRef = useRef<HTMLInputElement>(null);
     const listId = useId();
 
-    const allOptions = [...savedOptions(connections), ...presetOptions(connections)];
+    const allOptions = [...savedOptions(connections), ...presetOptions()];
     const visibleOptions = isFiltering ? filterOptions(allOptions, value) : allOptions;
     const activeOption = visibleOptions[activeIndex];
     const activeDescendant = isOpen && activeOption !== undefined ? `${listId}-${activeIndex}` : undefined;
@@ -174,7 +160,7 @@ export default function EndpointCombobox({ value, onChange, inputClassName }: Pr
     }
 
     function selectOption(option: EndpointOption): void {
-        onChange({ baseUrl: option.baseUrl, apiKey: option.apiKey });
+        onChange(option.selection);
         setIsFiltering(false);
         closeList();
     }

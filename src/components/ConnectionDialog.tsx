@@ -1,9 +1,9 @@
 import { useEffect, useId, useRef, useState, type ReactNode, type RefObject } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Check, Eye, EyeOff, PlugZap, RefreshCw, Save, TriangleAlert, X } from "lucide-react";
+import { Check, Eye, EyeOff, PlugZap, Save, X } from "lucide-react";
 import type { ConnectionSettings, ConnState } from "../lib/types";
-import { fetchModels, normalizeBaseUrl, prettyEndpoint } from "../lib/api";
-import { findSavedConnection, presetForURL, useSavedConnections } from "../lib/connections";
+import { normalizeBaseUrl, prettyEndpoint } from "../lib/api";
+import { connectionLabel, findConnectionById, presetForURL, useSavedConnections } from "../lib/connections";
 import { Label } from "./Primitives";
 import EndpointCombobox from "./EndpointCombobox";
 
@@ -34,33 +34,7 @@ const STATUS_DOT_CLASS_NAMES: Record<ConnState, string> = {
     error: "bg-coral-500",
 };
 
-const MODEL_ROW_CLASS_NAME =
-    "w-full truncate rounded-md px-2.5 py-1.5 text-left font-mono text-[11px] transition";
-
 const SAVED_FEEDBACK_MILLISECONDS = 1600;
-
-function modelRowTone(isSelected: boolean): string {
-    if (isSelected) {
-        return "bg-brass-700/20 text-brass-400";
-    }
-    return "text-mute-300 hover:bg-ink-800 hover:text-mute-100";
-}
-
-function describeError(error: unknown): string {
-    if (error instanceof Error) {
-        return error.message;
-    }
-    return String(error);
-}
-
-// Picking a model leaves its full id in the box, so an exact match must not hide every other model.
-function filterModels(models: string[], query: string): string[] {
-    const needle = query.trim().toLowerCase();
-    if (needle === "" || models.includes(query.trim())) {
-        return models;
-    }
-    return models.filter((model) => model.toLowerCase().includes(needle));
-}
 
 function Section({ title, hint, children }: { title: string; hint?: ReactNode; children: ReactNode }) {
     return (
@@ -77,6 +51,23 @@ function NormalizedURLHint({ baseUrl }: { baseUrl: string }) {
         return null;
     }
     return <span className="min-w-0 truncate font-mono text-[10px] text-mute-500">→ {normalizedURL}</span>;
+}
+
+function NameSection({ settings, onChange }: SectionProps) {
+    const defaultName = connectionLabel(settings.baseUrl);
+    return (
+        <Section title="Name">
+            <input
+                className={inputClassName}
+                aria-label="Connection name"
+                placeholder={defaultName === "" ? "My connection" : defaultName}
+                value={settings.name}
+                onChange={(event) => onChange({ name: event.target.value })}
+                spellCheck={false}
+                autoComplete="off"
+            />
+        </Section>
+    );
 }
 
 function EndpointSection({ settings, onChange }: SectionProps) {
@@ -126,98 +117,6 @@ function ApiKeySection({ settings, onChange }: SectionProps) {
                     {isKeyVisible ? <EyeOff size={14} /> : <Eye size={14} />}
                 </button>
             </div>
-        </Section>
-    );
-}
-
-interface ModelListProps {
-    models: string[];
-    selectedModel: string;
-    onSelect: (model: string) => void;
-}
-
-function ModelList({ models, selectedModel, onSelect }: ModelListProps) {
-    const matches = filterModels(models, selectedModel);
-    return (
-        <div className="space-y-1.5">
-            <p className="font-mono text-[10px] text-mute-500">
-                {matches.length} of {models.length} models
-            </p>
-            <ul className="max-h-48 overflow-y-auto rounded-lg border border-ink-700 bg-ink-950/70 p-1">
-                {matches.length === 0 && <li className="px-2.5 py-2 text-[11px] text-mute-500">No model matches.</li>}
-                {matches.map((model) => (
-                    <li key={model}>
-                        <button
-                            type="button"
-                            onClick={() => onSelect(model)}
-                            className={`${MODEL_ROW_CLASS_NAME} ${modelRowTone(model === selectedModel)}`}
-                        >
-                            {model}
-                        </button>
-                    </li>
-                ))}
-            </ul>
-        </div>
-    );
-}
-
-function ModelSection({ settings, onChange }: SectionProps) {
-    const [models, setModels] = useState<string[]>([]);
-    const [isLoading, setIsLoading] = useState(false);
-    const [errorMessage, setErrorMessage] = useState<string | null>(null);
-
-    async function discoverModels(): Promise<void> {
-        setIsLoading(true);
-        setErrorMessage(null);
-        try {
-            const discovered = await fetchModels(settings);
-            setModels(discovered);
-            if (discovered.length === 0) {
-                setErrorMessage("Endpoint reachable but returned no model list.");
-            }
-        } catch (error) {
-            setErrorMessage(describeError(error));
-            setModels([]);
-        } finally {
-            setIsLoading(false);
-        }
-    }
-
-    return (
-        <Section title="Model">
-            <div className="flex gap-2">
-                <input
-                    className={inputClassName}
-                    aria-label="Model"
-                    placeholder="laya"
-                    value={settings.model}
-                    onChange={(event) => onChange({ model: event.target.value })}
-                    spellCheck={false}
-                />
-                <button
-                    type="button"
-                    onClick={discoverModels}
-                    disabled={isLoading}
-                    title="Fetch /v1/models"
-                    className={`${secondaryButtonClassName} shrink-0`}
-                >
-                    <RefreshCw size={13} className={isLoading ? "animate-spin" : ""} />
-                    Discover
-                </button>
-            </div>
-            {errorMessage !== null && (
-                <p className="flex gap-1.5 text-[11px] leading-snug text-coral-400">
-                    <TriangleAlert size={12} className="mt-0.5 shrink-0" />
-                    {errorMessage}
-                </p>
-            )}
-            {models.length > 0 && (
-                <ModelList
-                    models={models}
-                    selectedModel={settings.model}
-                    onSelect={(model) => onChange({ model })}
-                />
-            )}
         </Section>
     );
 }
@@ -309,11 +208,11 @@ function saveButtonLabel(justSaved: boolean, hasSavedEntry: boolean): string {
     return "Save connection";
 }
 
-function SaveConnectionButton({ settings }: { settings: ConnectionSettings }) {
+function SaveConnectionButton({ settings, onChange }: SectionProps) {
     const { connections, saveConnection } = useSavedConnections();
     const [justSaved, setJustSaved] = useState(false);
     const hasEndpoint = normalizeBaseUrl(settings.baseUrl) !== "";
-    const hasSavedEntry = findSavedConnection(connections, settings.baseUrl) !== undefined;
+    const hasSavedEntry = findConnectionById(connections, settings.connectionId) !== undefined;
 
     useEffect(() => {
         if (!justSaved) {
@@ -324,7 +223,17 @@ function SaveConnectionButton({ settings }: { settings: ConnectionSettings }) {
     }, [justSaved]);
 
     function handleSave(): void {
-        saveConnection(settings.baseUrl, settings.apiKey);
+        const saved = saveConnection({
+            uuid: settings.connectionId,
+            name: settings.name,
+            baseUrl: settings.baseUrl,
+            apiKey: settings.apiKey,
+        });
+        if (saved === undefined) {
+            return;
+        }
+        // Shows the stored values, so a blank name now reads as the default it was saved under.
+        onChange({ connectionId: saved.uuid, name: saved.name });
         setJustSaved(true);
     }
 
@@ -345,7 +254,7 @@ function ConnectionStatus({ conn, connNote }: { conn: ConnState; connNote: strin
     );
 }
 
-function DialogFooter({ settings, conn, connNote, onTest, onClose }: Omit<DialogViewProps, "onChange">) {
+function DialogFooter({ settings, onChange, conn, connNote, onTest, onClose }: DialogViewProps) {
     return (
         <footer className="space-y-3 border-t border-ink-700 px-5 py-4 sm:px-6">
             <ConnectionStatus conn={conn} connNote={connNote} />
@@ -359,7 +268,7 @@ function DialogFooter({ settings, conn, connNote, onTest, onClose }: Omit<Dialog
                     <PlugZap size={13} />
                     {conn === "testing" ? "Testing…" : "Test connection"}
                 </button>
-                <SaveConnectionButton settings={settings} />
+                <SaveConnectionButton settings={settings} onChange={onChange} />
                 <button
                     type="button"
                     onClick={onClose}
@@ -453,14 +362,15 @@ function DialogView({ onClose, settings, onChange, conn, connNote, onTest }: Dia
             >
                 <DialogHeader titleId={titleId} onClose={onClose} />
                 <div className="min-h-0 flex-1 overflow-y-auto px-5 sm:px-6">
+                    <NameSection settings={settings} onChange={onChange} />
                     <EndpointSection settings={settings} onChange={onChange} />
                     <ApiKeySection settings={settings} onChange={onChange} />
-                    <ModelSection settings={settings} onChange={onChange} />
                     <GenerationSection settings={settings} onChange={onChange} />
                     <HeadersSection settings={settings} onChange={onChange} />
                 </div>
                 <DialogFooter
                     settings={settings}
+                    onChange={onChange}
                     conn={conn}
                     connNote={connNote}
                     onTest={onTest}

@@ -13,6 +13,7 @@ import SettingsPanel from "./components/SettingsPanel";
 import ConnectionDialog from "./components/ConnectionDialog";
 import Composer from "./components/Composer";
 import ChatComposer from "./components/ChatComposer";
+import ModelPicker, { type ModelPickerProps } from "./components/ModelPicker";
 import ResizablePanel from "./components/ResizablePanel";
 import { AssistantTurn, ChatUserTurn, PendingTurn, UserTurn } from "./components/TurnView";
 import { Chip } from "./components/Primitives";
@@ -26,9 +27,10 @@ import {
     runDemo,
 } from "./lib/api";
 import type { CallResult } from "./lib/api";
-import { findSavedConnection, loadSavedConnections } from "./lib/connections";
+import { findConnectionById, findFirstConnectionByURL, getSavedConnections } from "./lib/connections";
 import { newQuestion, uid } from "./lib/questions";
 import * as store from "./lib/storage";
+import { useModelCatalog } from "./lib/useModelCatalog";
 import type {
     ConnectionSettings,
     ConnState,
@@ -36,13 +38,16 @@ import type {
     InterfaceMode,
     LogEntry,
     Question,
+    SavedConnection,
     Turn,
 } from "./lib/types";
 
 const DEFAULT_SETTINGS: ConnectionSettings = {
+    connectionId: "",
+    name: "",
     baseUrl: "http://localhost:8000",
     apiKey: "",
-    model: "laya",
+    model: "",
     dialect: "systemone",
     temperature: 0,
     maxTokens: 1024,
@@ -166,21 +171,54 @@ const GREETING_BY_MODE: Record<InterfaceMode, () => Turn> = {
     chat: chatGreeting,
 };
 
-/** Old versions persisted the key next to the settings; keys now live only in the saved-connections list. */
+/**
+ * Old versions persisted the key next to the settings; keys now live only in the saved-connections list.
+ * The model is not restored either: each session starts from the provider's list (see useModelCatalog).
+ */
 function withoutLegacyFields(stored: Partial<ConnectionSettings>): Partial<ConnectionSettings> {
     const cleaned: Record<string, unknown> = { ...stored };
     delete cleaned.apiKey;
     delete cleaned.rememberKey;
+    delete cleaned.model;
     return cleaned as Partial<ConnectionSettings>;
+}
+
+function findStoredConnection(
+    stored: Partial<ConnectionSettings> | undefined,
+    restored: ConnectionSettings,
+): SavedConnection | undefined {
+    const connections = getSavedConnections();
+    const savedById = findConnectionById(connections, restored.connectionId);
+    if (savedById !== undefined) {
+        return savedById;
+    }
+    // Settings stored before connections had a uuid only know the endpoint.
+    const predatesUUIDs = stored !== undefined && stored.connectionId === undefined;
+    if (predatesUUIDs) {
+        return findFirstConnectionByURL(connections, restored.baseUrl);
+    }
+    return undefined;
 }
 
 function restoreSettings(stored: Partial<ConnectionSettings> | undefined): ConnectionSettings {
     const restored: ConnectionSettings = { ...DEFAULT_SETTINGS, ...withoutLegacyFields(stored ?? {}) };
     // The Messages dialect no longer exists, so a stored "messages" value falls back to Chat.
     const dialect: Dialect = restored.dialect === "systemone" ? "systemone" : "chat";
-    const savedConnection = findSavedConnection(loadSavedConnections(), restored.baseUrl);
-    return { ...restored, dialect, apiKey: savedConnection?.apiKey ?? "" };
+    const savedConnection = findStoredConnection(stored, restored);
+    if (savedConnection === undefined) {
+        return { ...restored, dialect, connectionId: "", apiKey: "" };
+    }
+    return {
+        ...restored,
+        dialect,
+        connectionId: savedConnection.uuid,
+        name: savedConnection.name,
+        baseUrl: savedConnection.baseUrl,
+        apiKey: savedConnection.apiKey,
+    };
 }
+
+const IDENTITY_FIELDS: string[] = ["connectionId", "name"];
 
 function hasSendableDecision(questions: Question[], stateText: string): boolean {
     if (questions.length === 0) {
@@ -261,7 +299,7 @@ function DialectSwitch({
 
 interface AppHeaderProps {
     dialect: Dialect;
-    model: string;
+    modelPicker: ModelPickerProps;
     onDialectChange: (dialect: Dialect) => void;
     onOpenMenu: () => void;
     onOpenSettings: () => void;
@@ -271,7 +309,7 @@ interface AppHeaderProps {
 
 function AppHeader({
     dialect,
-    model,
+    modelPicker,
     onDialectChange,
     onOpenMenu,
     onOpenSettings,
@@ -303,14 +341,15 @@ function AppHeader({
                 <DialectSwitch dialect={dialect} onChange={onDialectChange} />
             </div>
 
+            <ModelPicker {...modelPicker} />
+
             <button
                 onClick={onOpenSettings}
                 title="Connection settings"
                 aria-label="Connection settings"
-                className="flex items-center gap-1.5 rounded-lg border border-ink-700 bg-ink-850 p-1.5 text-[11px] text-mute-300 transition hover:border-ink-600 md:px-2.5"
+                className="flex items-center rounded-lg border border-ink-700 bg-ink-850 p-1.5 text-mute-300 transition hover:border-ink-600"
             >
                 <Settings2 size={14} />
-                <span className="hidden max-w-[10rem] truncate md:inline">{model || "laya"}</span>
             </button>
             <button
                 onClick={onExport}
@@ -503,7 +542,8 @@ export default function App() {
     useEffect(() => {
         store.save({
             // Keys persist only through the saved-connections list, never with the settings blob.
-            settings: { ...settings, apiKey: "" },
+            // The model lives in sessionStorage (see modelSelection.ts).
+            settings: { ...settings, apiKey: "", model: "" },
             history: transcripts[interfaceMode],
             logs: logs.slice(0, 60),
             composerHeight,
@@ -519,11 +559,37 @@ export default function App() {
 
     const patch = useCallback((p: Partial<ConnectionSettings>) => {
         setSettings((s) => ({ ...s, ...p }));
+        // Naming or saving a connection does not change how it connects, so a tested status stays valid.
+        const changesOnlyIdentity = Object.keys(p).every((field) => IDENTITY_FIELDS.includes(field));
+        if (changesOnlyIdentity) {
+            return;
+        }
         setConn("unknown");
         setConnNote("");
     }, []);
 
+    const setModel = useCallback((model: string) => {
+        setSettings((current) => {
+            if (current.model === model) {
+                return current;
+            }
+            return { ...current, model };
+        });
+    }, []);
+
+    const modelCatalog = useModelCatalog(settings, setModel);
+
     const endpointReady = normalizeBaseUrl(settings.baseUrl).length > 0;
+
+    const modelPicker: ModelPickerProps = {
+        model: settings.model,
+        models: modelCatalog.models,
+        isLoading: modelCatalog.isLoading,
+        errorMessage: modelCatalog.errorMessage,
+        hasEndpoint: endpointReady,
+        onSelect: modelCatalog.selectModel,
+        onReload: modelCatalog.reload,
+    };
 
     function pushLog(l: Omit<LogEntry, "id" | "at">) {
         setLogs((prev) => [{ id: uid(), at: Date.now(), ...l }, ...prev].slice(0, 60));
@@ -709,6 +775,11 @@ export default function App() {
         setSettingsOpen(true);
     }
 
+    function startNewConnection() {
+        patch({ connectionId: "", name: "", baseUrl: "", apiKey: "" });
+        openSettings();
+    }
+
     function toggleDemo() {
         setDemo((current) => !current);
         setConnNote("");
@@ -756,6 +827,7 @@ export default function App() {
                     conn={conn}
                     onTest={testConnection}
                     onOpenSettings={openSettings}
+                    onNewConnection={startNewConnection}
                     logs={logs}
                     onClearLogs={() => setLogs([])}
                 />
@@ -777,6 +849,7 @@ export default function App() {
                             conn={conn}
                             onTest={testConnection}
                             onOpenSettings={openSettings}
+                            onNewConnection={startNewConnection}
                             logs={logs}
                             onClearLogs={() => setLogs([])}
                         />
@@ -787,7 +860,7 @@ export default function App() {
             <main className="flex min-w-0 flex-1 flex-col">
                 <AppHeader
                     dialect={settings.dialect}
-                    model={settings.model}
+                    modelPicker={modelPicker}
                     onDialectChange={(dialect) => patch({ dialect })}
                     onOpenMenu={() => setSidebar(true)}
                     onOpenSettings={openSettings}
