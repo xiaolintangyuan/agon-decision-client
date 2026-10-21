@@ -5,6 +5,7 @@ import rehypeRaw from "rehype-raw";
 import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
 import { CodeBlock } from "./CodeBlock";
+import { HtmlPreview } from "./HtmlPreview";
 
 type PreProps = ComponentPropsWithoutRef<"pre"> & ExtraProps;
 type LinkProps = ComponentPropsWithoutRef<"a"> & ExtraProps;
@@ -69,6 +70,9 @@ function PreBlock({ node, children }: PreProps) {
     const codeBlock = readCodeBlock(node);
     if (codeBlock === null) {
         return <pre>{children}</pre>;
+    }
+    if (codeBlock.language === "html") {
+        return <HtmlPreview html={codeBlock.code}>{children}</HtmlPreview>;
     }
     return (
         <CodeBlock code={codeBlock.code} language={codeBlock.language}>

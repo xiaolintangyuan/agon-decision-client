@@ -1,14 +1,24 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { CodeBlock } from "./CodeBlock";
 
 type PreviewTab = "preview" | "source";
+
+interface HtmlPreviewProps {
+    html: string;
+    // Pre-rendered (highlighted) source element for the Source tab; the plain html is shown when omitted.
+    children?: ReactNode;
+}
+
+// Scripts run so generated pages such as charts work. Leaving out allow-same-origin keeps the page in an
+// opaque origin, so it cannot read this app's storage or saved API keys; popups and top navigation stay blocked.
+const PREVIEW_SANDBOX = "allow-scripts";
 
 const TAB_LABELS: Record<PreviewTab, string> = {
     preview: "Preview",
     source: "Source",
 };
 
-export function HtmlPreview({ html }: { html: string }) {
+export function HtmlPreview({ html, children }: HtmlPreviewProps) {
     const [tab, setTab] = useState<PreviewTab>("preview");
 
     return (
@@ -31,12 +41,14 @@ export function HtmlPreview({ html }: { html: string }) {
             {tab === "preview" ? (
                 <iframe
                     title="HTML preview"
-                    sandbox=""
+                    sandbox={PREVIEW_SANDBOX}
                     srcDoc={html}
                     className="h-[420px] w-full rounded-xl border border-ink-700 bg-white"
                 />
             ) : (
-                <CodeBlock code={html} language="html" />
+                <CodeBlock code={html} language="html">
+                    {children}
+                </CodeBlock>
             )}
         </div>
     );

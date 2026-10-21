@@ -130,8 +130,8 @@ const CONN_TONE: Record<ConnState, ChipTone> = {
 const CONN_TEXT: Record<ConnState, string> = {
     ok: "connected",
     error: "unreachable",
-    testing: "testing",
-    unknown: "not tested",
+    testing: "connecting",
+    unknown: "not connected",
 };
 
 const CONN_DOT_CLASS: Record<ConnState, string> = {
