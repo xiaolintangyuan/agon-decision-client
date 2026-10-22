@@ -75,7 +75,7 @@ const MODEL_FILTER_BY_DOMAIN: Record<string, ModelFilter> = {
 const HEADERS_BY_DOMAIN: Record<string, Record<string, string>> = {
     "openrouter.ai": {
         "HTTP-Referer": "https://xiaolintangyuan.github.io/agon-decision-client",
-        "X-OpenRouter-Title": "Agon Decision Client",
+        "X-OpenRouter-Title": "Agon Community Edition",
         "X-OpenRouter-Categories": "personal-agent",
     },
 };

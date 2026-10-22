@@ -131,7 +131,7 @@ const DECISION_GREETING: Turn = {
     role: "assistant",
     createdAt: 0,
     text:
-        "Agon Decision Client is ready. Open Connections to set an endpoint and an API key, then describe what you want decided. You can ask several typed questions at once — a SystemOne endpoint scores them all in a single forward pass.",
+        "Agon Community Edition is ready. To begin, create a new connection from a list of preset endpoints or enter your own, followed by the API key. Important Note: Your connection profiles on your own browser and is never sent to us. Then use either Decision or Chat mode to begin.",
 };
 
 const CHAT_GREETING: Turn = {
@@ -335,13 +335,13 @@ function AppHeader({
 
             <div className="flex items-center gap-2.5">
                 <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-brass-500 to-brass-700">
-                    <span className="font-mono text-[13px] font-bold text-ink-950">&#916;</span>
+                    <span className="font-mono text-[13px] font-bold text-ink-950">AG</span>
                 </div>
                 <div className="hidden leading-tight sm:block">
-                    <div className="font-heading text-[13.5px] font-semibold tracking-tight text-mute-100">
-                        Agon Decision Client
+                    <div className="text-[13.5px] font-semibold tracking-tight text-mute-100">
+                        Agon Community Edition
                     </div>
-                    <div className="font-mono text-[10px] text-mute-600">a systemone client</div>
+                    <div className="font-mono text-[10px]">AI assistant on your browser</div>
                 </div>
             </div>
 
